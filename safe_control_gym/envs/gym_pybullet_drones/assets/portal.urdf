@@ -134,19 +134,21 @@
     <child link="red_edge"/>
   </joint>
 
+<!-- box_height: GATE_HEIGHT - (GATE_DIM + PIPE_WIDTH)/2 -->
+<!-- origin offset: (GATE_DIM + PIPE_WIDTH)/2 + box_height/2 -->
 
   <link name="support"> 
 
     <inertial>
-      <origin rpy="0 0 0" xyz="0 0 -0.6"/>
+      <origin rpy="0 0 0" xyz="0 0 -0.3875"/>
       <mass value="1.0"/>
       <inertia ixx="0" ixy="0.0" ixz="0.0" iyy="0" iyz="0.0" izz="0"/>
     </inertial>
 
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 -0.6"/>
+      <origin rpy="0 0 0" xyz="0 0 -0.3875"/>
       <geometry>
-        <cylinder length=".8" radius="0.05" />
+        <cylinder length="0.275" radius="0.05" />
       </geometry> 
       <material name="kindablue">
         <color rgba=".1 .5 .7 1"/>
@@ -154,9 +156,9 @@
     </visual>
 
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 -0.6"/>
+      <origin rpy="0 0 0" xyz="0 0 -0.3875"/>
       <geometry>
-        <cylinder length=".8" radius="0.05" />
+        <cylinder length="0.275" radius="0.05" />
       </geometry>
     </collision>  
 

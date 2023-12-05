@@ -406,10 +406,12 @@ class Quadrotor(BaseAviary):
         for gate in self.GATES:
             if gate[6] == 0:
                 urdf_file = "portal.urdf"
-                gate_height = 1. # URDF dependent, places 'portal.urdf' at z == 0.
+                # NOTE(shreepa): I think this handles the gate height, but just renders the post with a smaller rendering?
+                # might be worth testing it hitting the pole at the base to see what happens
+                gate_height = 0.525 # URDF dependent, places 'portal.urdf' at z == 0.
             elif gate[6] == 1:
                 urdf_file = "low_portal.urdf"
-                gate_height = 0.525 # URDF dependent, places 'low_portal.urdf' at z == 0.
+                gate_height = 0.3 # URDF dependent, places 'low_portal.urdf' at z == 0.
             else:
                 raise ValueError("[ERROR] Unknown gate type.")
             if self.RANDOMIZED_GATES_AND_OBS:
@@ -933,11 +935,11 @@ class Quadrotor(BaseAviary):
         if self.COST == Cost.COMPETITION:
             reward = 0
             # Reward for stepping through the (correct) next gate.
-            if self.stepped_through_gate:
-                reward += 100
+            # if self.stepped_through_gate:
+            #     reward += 100
             # Reward for reaching goal position (after navigating the gates in the correct order).
-            if self.at_goal_pos:
-                reward += 100
+            # if self.at_goal_pos:
+            #     reward += 100
             # Penalize by collision.
             if self.currently_collided:
                 reward -= 1000

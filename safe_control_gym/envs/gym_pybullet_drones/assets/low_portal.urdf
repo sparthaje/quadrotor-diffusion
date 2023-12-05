@@ -4,13 +4,13 @@
 
   <link name="base_link"> 
     <inertial>
-      <mass value="0.1"/>
+      <mass value="100"/>
       <inertia ixx="0" ixy="0.0" ixz="0.0" iyy="0" iyz="0.0" izz="0"/>
     </inertial>
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <sphere radius="0.01"/>
+        <sphere radius="100"/>
       </geometry> 
       <material name="grey">
         <color rgba=".5 .5 .5 1"/>
@@ -135,35 +135,38 @@
   </joint>
 
 
-  <link name="box_link"> 
+<!-- box_height: GATE_HEIGHT - (GATE_DIM + PIPE_WIDTH * 2)/2 -->
+<!-- origin offset: (GATE_DIM + PIPE_WIDTH * 2)/2 + box_height/2 -->
+
+ <link name="support"> 
 
     <inertial>
-      <origin rpy="0 0 0" xyz="0 0 -0.4"/>
-      <mass value="1."/>
+      <origin rpy="0 0 0" xyz="0 0 -0.275"/>
+      <mass value="1.0"/>
       <inertia ixx="0" ixy="0.0" ixz="0.0" iyy="0" iyz="0.0" izz="0"/>
     </inertial>
 
     <visual>
-      <origin rpy="0 0 0" xyz="0 0 -0.4"/>
+      <origin rpy="0 0 0" xyz="0 0 -0.275"/>
       <geometry>
-        <box size=".15 .15 .25" />
+        <cylinder length="0.05" radius="0.05" />
       </geometry> 
-      <material name="brown">
-        <color rgba=".92 .87 .79 1"/>
+      <material name="kindablue">
+        <color rgba=".1 .5 .7 1"/>
       </material> 
     </visual>
 
     <collision>
-      <origin rpy="0 0 0" xyz="0 0 -0.4"/>
+      <origin rpy="0 0 0" xyz="0 0 -0.275"/>
       <geometry>
-        <box size=".15 .15 .25" />
+        <cylinder length="0.05" radius="0.05" />
       </geometry>
-    </collision>   
+    </collision>  
 
   </link>
-    <joint name="box_joint" type="fixed">
+    <joint name="support_joint" type="fixed">
     <parent link="base_link"/>
-    <child link="box_link"/>
+    <child link="support"/>
   </joint>
 
 </robot>
