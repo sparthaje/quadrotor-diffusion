@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
   CONFIG_FACTORY = ConfigFactory()
   config = CONFIG_FACTORY.merge()
-  config["quadrotor_config"]["gates"] = [[0.5, -2.5, 0, 0, 0, -1.57, 0], [5, -2.5, 0, 0, 0, -1.57, 1]]
+  config["quadrotor_config"]["gates"] = [[0.5, -2.5, 0, 0, 0, -np.pi/2, 1], [1.5, -2.5, 0, 0, 0, -np.pi/2, 0]]
   # TODO(shreepa): get gate dimensions / modify gate dimensions to be shorter to account for vicon
   final_exit_vector = yaw_rot(config["quadrotor_config"]["gates"][-1][-2]) @ INITIAL_GATE_EXIT
 
