@@ -285,30 +285,42 @@ def plot_trajectory(t_scaled,
                     waypoints,
                     ref_x,
                     ref_y,
-                    ref_z
+                    ref_z,
+                    ref_vel_x,
+                    ref_vel_y,
+                    ref_vel_z
                     ):
     """Plot the trajectory with matplotlib.
 
     """
     # Plot each dimension.
-    _, axs = plt.subplots(3, 1)
-    axs[0].plot(t_scaled, ref_x)
-    axs[0].set_ylabel('x (m)')
-    axs[1].plot(t_scaled, ref_y)
-    axs[1].set_ylabel('y (m)')
-    axs[2].plot(t_scaled, ref_z)
-    axs[2].set_ylabel('z (m)')
-    plt.show(block=False)
-    plt.pause(2)
-    plt.close()
+    # _, axs = plt.subplots(6, 1)
+    # axs[0].plot(t_scaled, ref_x)
+    # axs[0].set_ylabel('x (m)')
+    # axs[1].plot(t_scaled, ref_y)
+    # axs[1].set_ylabel('y (m)')
+    # axs[2].plot(t_scaled, ref_z)
+    # axs[2].set_ylabel('z (m)')
 
-    # Plot in 3D.
-    ax = plt.axes(projection='3d')
-    ax.plot3D(ref_x, ref_y, ref_z)
-    ax.scatter3D(waypoints[:,0], waypoints[:,1], waypoints[:,2])
-    plt.show(block=False)
-    plt.pause(2)
-    plt.close()
+    # axs[3].plot(t_scaled, ref_vel_x)
+    # axs[3].set_ylabel('vel x (m/s)')
+
+    # axs[4].plot(t_scaled, ref_vel_y)
+    # axs[4].set_ylabel('vel y (m/s)')
+
+    # axs[5].plot(t_scaled, ref_vel_z)
+    # axs[5].set_ylabel('vel z (m/s)')
+
+    # plt.show(block=False)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+    # # Plot in 3D.
+    # # ax = plt.axes(projection='3d')
+    # ax.plot3D(ref_x, ref_y, ref_z)
+    # ax.scatter3D(waypoints[:,0], waypoints[:,1], waypoints[:,2])
+    # plt.show(block=False)
+    # plt.pause(2)
+    # plt.close()
 
 def draw_trajectory(initial_info,
                     waypoints,
@@ -324,7 +336,7 @@ def draw_trajectory(initial_info,
                    [point[0], point[1], point[2]],
                    p.getQuaternionFromEuler([0,0,0]),
                    physicsClientId=initial_info["pyb_client"])
-    step = int(ref_x.shape[0]/50)
+    step = min(int(ref_x.shape[0]/50), ref_x.shape[0])
     for i in range(step, ref_x.shape[0], step):
         p.addUserDebugLine(lineFromXYZ=[ref_x[i-step], ref_y[i-step], ref_z[i-step]],
                            lineToXYZ=[ref_x[i], ref_y[i], ref_z[i]],

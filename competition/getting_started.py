@@ -39,17 +39,13 @@ finally:
     print("Module 'cffirmware' available:", FIRMWARE_INSTALLED)
 
 
-def run(test=False):
+def run(config, test=False):
     """The main function creating, running, and closing an environment over N episodes.
 
     """
 
     # Start a timer.
     START = time.time()
-
-    # Load configuration.
-    CONFIG_FACTORY = ConfigFactory()
-    config = CONFIG_FACTORY.merge()
 
     # Testing (without pycffirmware).
     if test:
@@ -80,6 +76,7 @@ def run(test=False):
         obs, info = firmware_wrapper.reset()
         info['ctrl_timestep'] = CTRL_DT
         info['ctrl_freq'] = CTRL_FREQ
+        input(info)
         env = firmware_wrapper.env
     else:
         env = make('quadrotor', **config.quadrotor_config)
@@ -154,9 +151,9 @@ def run(test=False):
                                            lifeTime=3*CTRL_DT,
                                            textSize=1.5,
                                            parentObjectUniqueId=0,
-                                           parentLinkIndex=-1,
-                                           replaceItemUniqueId=time_label_id,
-                                           physicsClientId=env.PYB_CLIENT)
+                                               parentLinkIndex=-1,
+                                               replaceItemUniqueId=time_label_id,
+                                               physicsClientId=env.PYB_CLIENT)
 
         # Compute control input.
         if config.use_firmware:
@@ -249,8 +246,8 @@ def run(test=False):
         # If an episode is complete, reset the environment.
         if done:
             # Plot logging (comment as desired).
-            if not test:
-                logger.plot(comment="get_start-episode-"+str(episodes_count), autoclose=True)
+            # if not test:
+                # logger.plot(comment="get_start-episode-"+str(episodes_count), autoclose=True)
 
             # CSV save.
             logger.save_as_csv(comment="get_start-episode-"+str(episodes_count))
@@ -317,6 +314,7 @@ def run(test=False):
 
     # Close the environment and print timing statistics.
     env.close()
+
     elapsed_sec = time.time() - START
     print(str("\n{:d} iterations (@{:d}Hz) and {:d} episodes in {:.2f} sec, i.e. {:.2f} steps/sec for a {:.2f}x speedup.\n"
           .format(i,
@@ -338,5 +336,26 @@ def run(test=False):
     print(tree)
     print('\n\n')
 
+import multiprocessing
+
 if __name__ == "__main__":
-    run()
+    # num_processes = multiprocessing.cpu_count()
+    # num_processes = 1
+    # processes = []
+
+    # # Load configuration.
+    CONFIG_FACTORY = ConfigFactory()
+    config = CONFIG_FACTORY.merge()
+
+    # for i in range(num_processes):
+    #     process = multiprocessing.Process(target=run, args=(config,))
+    #     processes.append(process)
+
+    # for process in processes:
+    #     process.start()
+
+    # for process in processes:
+    #     print(process)
+    #     process.join()
+    
+    run(config)
