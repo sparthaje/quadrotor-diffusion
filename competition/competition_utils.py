@@ -294,33 +294,29 @@ def plot_trajectory(t_scaled,
 
     """
     # Plot each dimension.
-    # _, axs = plt.subplots(6, 1)
-    # axs[0].plot(t_scaled, ref_x)
-    # axs[0].set_ylabel('x (m)')
-    # axs[1].plot(t_scaled, ref_y)
-    # axs[1].set_ylabel('y (m)')
-    # axs[2].plot(t_scaled, ref_z)
-    # axs[2].set_ylabel('z (m)')
+    _, axs = plt.subplots(6, 1)
+    axs[0].plot(t_scaled, ref_x)
+    axs[0].set_ylabel('x (m)')
+    axs[1].plot(t_scaled, ref_y)
+    axs[1].set_ylabel('y (m)')
+    axs[2].plot(t_scaled, ref_z)
+    axs[2].set_ylabel('z (m)')
 
-    # axs[3].plot(t_scaled, ref_vel_x)
-    # axs[3].set_ylabel('vel x (m/s)')
+    axs[3].plot(t_scaled, ref_vel_x)
+    axs[3].set_ylabel('vel x (m/s)')
 
-    # axs[4].plot(t_scaled, ref_vel_y)
-    # axs[4].set_ylabel('vel y (m/s)')
+    axs[4].plot(t_scaled, ref_vel_y)
+    axs[4].set_ylabel('vel y (m/s)')
 
-    # axs[5].plot(t_scaled, ref_vel_z)
-    # axs[5].set_ylabel('vel z (m/s)')
+    axs[5].plot(t_scaled, ref_vel_z)
+    axs[5].set_ylabel('vel z (m/s)')
 
-    # plt.show(block=False)
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    # # Plot in 3D.
-    # # ax = plt.axes(projection='3d')
-    # ax.plot3D(ref_x, ref_y, ref_z)
-    # ax.scatter3D(waypoints[:,0], waypoints[:,1], waypoints[:,2])
-    # plt.show(block=False)
-    # plt.pause(2)
-    # plt.close()
+    plt.show(block=False)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot3D(ref_x, ref_y, ref_z)
+    ax.scatter3D(waypoints[:,0], waypoints[:,1], waypoints[:,2])
+    plt.show(block=False)
 
 def draw_trajectory(initial_info,
                     waypoints,

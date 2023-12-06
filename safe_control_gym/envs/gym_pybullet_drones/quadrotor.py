@@ -331,8 +331,9 @@ class Quadrotor(BaseAviary):
         # IROS 2022 - Load maze.
         self.OBSTACLES = []
         self.GATES = []
+        # NOTE(shreepa): environment doesn't render the bounds obstacles unless in GUI mode
         if 'obstacles' in kwargs:
-            self.OBSTACLES = kwargs['obstacles']
+            self.OBSTACLES = kwargs['obstacles'] if kwargs["gui"] else []
         if 'gates' in kwargs:
             self.GATES = kwargs['gates']
         if 'randomized_gates_and_obstacles' in kwargs and kwargs['randomized_gates_and_obstacles']:
@@ -942,10 +943,10 @@ class Quadrotor(BaseAviary):
             #     reward += 100
             # Penalize by collision.
             if self.currently_collided:
-                reward -= 1000
+                reward -= 1000.001
             # Penalize by constraint violation.
             if self.cnstr_violation:
-                reward -= 100
+                reward -= 1000.0000001
             # Penalize by loss from X_GOAL, U_GOAL state.
             # reward += float(-1 * self.symbolic.loss(x=self.state,
             #                                         Xr=self.X_GOAL,
@@ -962,6 +963,7 @@ class Quadrotor(BaseAviary):
             bool: Whether an episode is over.
 
         """
+
         # Done if goal reached for stabilization task with quadratic cost.
         if self.TASK == Task.STABILIZATION and self.COST == Cost.QUADRATIC:
             self.goal_reached = bool(np.linalg.norm(self.state - self.X_GOAL) < self.TASK_INFO["stabilization_goal_tolerance"])

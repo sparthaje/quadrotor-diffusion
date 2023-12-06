@@ -27,6 +27,7 @@ Tips:
 import numpy as np
 
 from collections import deque
+from enum import Enum
 
 try:
     from competition_utils import Command, PIDController, timing_step, timing_ep, plot_trajectory, draw_trajectory
@@ -70,7 +71,13 @@ def calc_traj(sigma, T):
         [0, 0, 0, 0, 6, 0, 0, 0],
         [210*T**4, 120*T**3, 60*T**2, 24*T, 6, 0, 0, 0],
     ])
-    return np.linalg.inv(M) @ sigma(T)
+    return np.linalg.inv(M) @ sigma
+
+class States(Enum):
+    PRE_LAUNCH = 1
+    TAKEOFF = 2
+    FOLLOWING_TRAJ = 3
+    FINISHED = 4
 
 class Controller():
     """Template controller class.
@@ -82,7 +89,8 @@ class Controller():
                  initial_info,
                  use_firmware: bool = False,
                  buffer_size: int = 100,
-                 verbose: bool = False
+                 verbose: bool = False,
+                 gui: bool = False
                  ):
         """Initialization of the controller.
 
@@ -131,183 +139,99 @@ class Controller():
         # REPLACE THIS (START) ##
         #########################
 
-        # Call a function in module `example_custom_utils`.
-        ecu.exampleFunction()
-
-        # Example: hardcode waypoints through the gates.
-        if use_firmware:
-            # this is the waypoint after takeoff
-            waypoints = [(self.initial_obs[0], self.initial_obs[2], 0.525)]
-            # waypoints = [(self.initial_obs[0], self.initial_obs[2], initial_info["gate_dimensions"]["tall"]["height"])]  # Height is hardcoded scenario knowledge.
-        else:
-            waypoints = [(self.initial_obs[0], self.initial_obs[2], self.initial_obs[4])]
+        self.takeoff_height = 0.3
         
-        for idx, g in enumerate(self.NOMINAL_GATES):
-            height = initial_info["gate_dimensions"]["tall"]["height"] if g[6] == 0 else initial_info["gate_dimensions"]["low"]["height"]
-            waypoints.append((g[0]+0.1, g[1]-0.1, height))
+        # this is the waypoint after takeoff
+        waypoints = [(self.initial_obs[0], self.initial_obs[2], self.takeoff_height)]
+        boundaries = [
+            [
+                0,
+                np.array([self.initial_obs[0], self.initial_obs[2], self.takeoff_height]),  # pos
+                np.zeros(3),  # vel
+                np.zeros(3),  # acc
+                np.zeros(3),  # jerk
+            ]
+        ]
+
+        for g in self.NOMINAL_GATES:
+            # height = initial_info["gate_dimensions"]["tall"]["height"] if g[6] == 0 else initial_info["gate_dimensions"]["low"]["height"]
+            height = 0.525 if g[6] == 0 else 0.3
+            waypoints.append((g[0], g[1], height))
+            
+            # exit_vel, exit_acc, exit_jerk = π(current_state, gate, future_gate) 
+            # if we are at last gate don't use policy just manually set boundary conditions for last pos to be 0s for derivatives
+
+            import random
+            T, exit_vel, exit_acc, exit_jerk = 3, 0.5, 0, 0
+
+            boundaries.append([
+                T,  # time to reach this boundary
+                np.array([g[0], g[1], height]),  # pos
+                exit_vel * yaw_rot(g[5]) @ INITIAL_GATE_EXIT,  # vel
+                exit_acc * yaw_rot(g[5]) @ INITIAL_GATE_EXIT,  # acc
+                exit_jerk * yaw_rot(g[5]) @ INITIAL_GATE_EXIT,  # jerk
+            ])
 
         # this adds the last position to hit
         waypoints.append([initial_info["x_reference"][0], initial_info["x_reference"][2], initial_info["x_reference"][4]])
+        boundaries.append([
+                1,  # time to reach this boundary
+                np.array([initial_info["x_reference"][0], initial_info["x_reference"][2], initial_info["x_reference"][4]]),  # pos
+                np.zeros(3),  # vel
+                np.zeros(3),  # acc
+                np.zeros(3),  # jerk
+            ])
+        
+        print()
+        print(f"----- {len(waypoints)} WAYPOINTS------")
+        print("\t" + str(waypoints))
+        print("------------------------")
+        print()
 
-        #TODO(shreepa): find the real centers of the gates + the exit velocities to build this waypoints list
+         # Polynomial fit.
+        self.ref_pos = [[], [], []]
+        self.ref_vel = [[], [], []]
+        self.ref_acc = [[], [], []]
+        self.T = []
+
+        for index in range(len(boundaries) - 1):
+            b_0 = boundaries[index]
+            b_f = boundaries[index + 1]
+            for xyz in range(3):
+                sigma = np.array([b_0[1][xyz], b_f[1][xyz], b_0[2][xyz], b_f[2][xyz], b_0[3][xyz], b_f[3][xyz], b_0[4][xyz], b_f[4][xyz]])
+                coeff = calc_traj(sigma, b_f[0])
+
+                t = np.linspace(0, b_f[0], int(b_f[0] * 2 * self.CTRL_FREQ))
+                self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
+                self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
+                self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
+            self.T.append(b_f[0])
+
         #TODO(shreepa): formalize a way to compute the net trajectory using some kind of policy π(current_pos, next_gate, following_gate)
-        print(waypoints)
-        # input()
-        # if len(waypoints) == 2:
-        #     waypoints.insert(1, (0.6, -2.6, 1.0))
-        # print(waypoints)
-        ### WAYPOINT 1 TO GATE
+        #TODO(shreepa): work on gate spawning logic
+        #TODO(shreepa): add error from error
+        #TODO(shreepa): split trajectory into multiple componenets
+        
+        for xyz in range(3):
+            assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz])
+        
+        assert len(self.ref_pos[0]) == len(self.ref_pos[1]) and len(self.ref_pos[1]) == len(self.ref_pos[2])
+        assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
+        assert len(self.ref_acc[0]) == len(self.ref_acc[1]) and len(self.ref_acc[1]) == len(self.ref_acc[2])
 
-        x_0 = waypoints[0][0]
-        x_f = waypoints[1][0]
-        vx_0 = 0
-        vx_f = 0.5 # the way the gate is positioned the exit velocity should be in the +x direction
-        ax_0 = 0
-        ax_f = vx_f - vx_0  # need to divide by T after its calculated
-        jx_0 = 0
-        jx_f = ax_f - ax_0  # need to divide by T after its calculated
-        sx_0 = 0
-        sx_f = jx_f - jx_0  # need to divide by T after its calculated
-
-        T_one = abs(2 * (x_f - x_0) / (vx_f + vx_0))
-        # T_one = 2.5
-        sigma_x = lambda T: np.array([x_0, x_f, vx_0, vx_f, ax_0, ax_f / T, jx_0, jx_f / T]).T
-
-        y_0 = waypoints[0][1]
-        y_f = waypoints[1][1]
-        vy_0 = 0
-        vy_f = 0
-        ay_0 = 0
-        ay_f = 0
-        jy_0 = 0
-        jy_f = 0
-        sy_0 = 0
-        sy_f = 0
-
-        sigma_y = lambda T: np.array([y_0, y_f, vy_0, vy_f, ay_0, ay_f, jy_0, jy_f]).T
-
-        z_0 = waypoints[0][2]
-        z_f = waypoints[1][2]
-        vz_0 = 0
-        vz_f = 0
-        az_0 = 0
-        az_f = 0
-        jz_0 = 0
-        jz_f = 0
-        sz_0 = 0
-        sz_f = 0
-
-        sigma_z = lambda T: np.array([z_0, z_f, vz_0, vz_f, az_0, az_f, jz_0, jz_f]).T
-
-        coeff_x = calc_traj(sigma_x, T_one)
-        coeff_y = calc_traj(sigma_y, T_one)
-        coeff_z = calc_traj(sigma_z, T_one)
-
-        t_one = np.linspace(0, T_one, int(T_one * self.CTRL_FREQ))
-        x_one = np.polyval(coeff_x, t_one)
-        x_vel_one = np.polyval(np.polyder(coeff_x, 1), t_one) 
-        x_acc_one = np.polyval(np.polyder(coeff_x, 2), t_one) 
-
-        y_one = np.polyval(coeff_y, t_one)
-        y_vel_one = np.polyval(np.polyder(coeff_y, 1), t_one) 
-        y_acc_one = np.polyval(np.polyder(coeff_y, 2), t_one) 
-
-        z_one = np.polyval(coeff_z, t_one)
-        z_vel_one = np.polyval(np.polyder(coeff_z, 1), t_one) 
-        z_acc_one = np.polyval(np.polyder(coeff_z, 2), t_one) 
-
-        ###
-
-        ### WAYPOINT 1 TO 2
-
-        x_0 = waypoints[1][0]
-        x_f = waypoints[2][0]
-        vx_0 = vx_f
-        vx_f = 1
-        ax_0 = ax_f / T_one
-        ax_f = vx_f - vx_0  # need to divide by T after its calculated
-        jx_0 = jx_f / T_one
-        jx_f = ax_f - ax_0  # need to divide by T after its calculated
-        sx_0 = sx_f / T_one
-        sx_f = jx_f - jx_0  # need to divide by T after its calculated
-
-        sigma_x = lambda T: np.array([x_0, x_f, vx_0, vx_f, ax_0, ax_f / T, jx_0, jx_f / T]).T
-
-        y_0 = waypoints[1][1]
-        y_f = waypoints[2][1]
-        vy_0 = 0
-        vy_f = 0
-        ay_0 = 0
-        ay_f = 0
-        jy_0 = 0
-        jy_f = 0
-        sy_0 = 0
-        sy_f = 0
-
-        sigma_y = lambda T: np.array([y_0, y_f, vy_0, vy_f, ay_0, ay_f, jy_0, jy_f]).T
-
-        z_0 = waypoints[1][2]
-        z_f = waypoints[2][2]
-        vz_0 = 0
-        vz_f = 0
-        az_0 = 0
-        az_f = 0
-        jz_0 = 0
-        jz_f = 0
-        sz_0 = 0
-        sz_f = 0
-
-        sigma_z = lambda T: np.array([z_0, z_f, vz_0, vz_f, az_0, az_f, jz_0, jz_f]).T
-        T_two = abs(2 * (x_f - x_0) / (vx_f + vx_0))
-
-        coeff_x = calc_traj(sigma_x, T_two)
-        coeff_y = calc_traj(sigma_y, T_two)
-        coeff_z = calc_traj(sigma_z, T_two)
-
-        t_two = np.linspace(0, T_two, int(T_two * self.CTRL_FREQ))
-        x_two = np.polyval(coeff_x, t_two)
-        x_vel_two = np.polyval(np.polyder(coeff_x, 1), t_two) 
-        x_acc_two = np.polyval(np.polyder(coeff_x, 2), t_two) 
-
-        y_two = np.polyval(coeff_y, t_two)
-        y_vel_two = np.polyval(np.polyder(coeff_y, 1), t_two) 
-        y_acc_two = np.polyval(np.polyder(coeff_y, 2), t_two) 
-
-        z_two = np.polyval(coeff_z, t_two)
-        z_vel_two = np.polyval(np.polyder(coeff_z, 1), t_two) 
-        z_acc_two = np.polyval(np.polyder(coeff_z, 2), t_two) 
-
-        ###
-
-        # Polynomial fit.
-        self.ref_x = np.append(x_one, x_two)
-        self.ref_y = np.append(y_one, y_two)
-        self.ref_z = np.append(z_one, z_two)
-
-        self.ref_vel_x = np.append(x_vel_one, x_vel_two)
-        self.ref_vel_y = np.append(y_vel_one, y_vel_two)
-        self.ref_vel_z = np.append(z_vel_one, z_vel_two)    
-
-        self.ref_acc_x = np.append(x_acc_one, x_acc_two)
-        self.ref_acc_y = np.append(y_acc_one, y_acc_two)
-        self.ref_acc_z = np.append(z_acc_one, z_acc_two)
-        # print(self.ref_x)
-        self.total_time = T_one + T_two
-
-        self.trajectory_reward = 0
-
-        log = np.vstack((np.append(t_one, t_two + T_one), self.ref_x, self.ref_y, self.ref_z, self.ref_vel_x, self.ref_vel_y, self.ref_vel_z, self.ref_acc_x, self.ref_acc_y, self.ref_acc_z)).T
-        np.savetxt("results/trajectory.csv", log, delimiter=',')
+        self.total_time = sum(self.T)
+        self.trajectory_reward = -self.total_time
 
         self.waypoints = np.array(waypoints)
         self.errors = []
 
-        if self.VERBOSE:
-            # Plot trajectory in each dimension and 3D.
-            plot_trajectory(np.append(t_one, t_two + T_one), self.waypoints, self.ref_x, self.ref_y, self.ref_z, self.ref_vel_x, self.ref_vel_y, self.ref_vel_z)
-
+        if gui:
             # Draw the trajectory on PyBullet's GUI.
-            draw_trajectory(initial_info, self.waypoints, self.ref_x, self.ref_y, self.ref_z)
+            plot_trajectory(np.linspace(0, self.total_time, len(self.ref_pos[0])), self.waypoints, self.ref_pos[0], self.ref_pos[1], self.ref_pos[2], self.ref_vel[0], self.ref_vel[1], self.ref_vel[2])
+            draw_trajectory(initial_info, self.waypoints, self.ref_pos[0], self.ref_pos[1], self.ref_pos[2])
+        
+        self.state = States.PRE_LAUNCH
+
         self.prev_args = []
         #########################
         # REPLACE THIS (END) ####
@@ -352,54 +276,42 @@ class Controller():
         TAKEOFF_TIME = 3
         # print(iteration)
         if iteration == 0:
-            height = 0.525
-            duration = 1.5
-
             command_type = Command(2)  # Take-off.
-            args = [height, duration]
+            args = [self.takeoff_height, TAKEOFF_TIME]
             # print("takeoff")
             self.prev_args = []
+            self.state = States.TAKEOFF
         elif iteration >= TAKEOFF_TIME*self.CTRL_FREQ and iteration < (TAKEOFF_TIME + self.total_time)*self.CTRL_FREQ:
             # print("stepping")
-            step = min(iteration-3*self.CTRL_FREQ, len(self.ref_x) -1)
-            target_pos = np.array([self.ref_x[step], self.ref_y[step], self.ref_z[step]])
-            target_vel = np.array([self.ref_vel_x[step], self.ref_vel_y[step], self.ref_vel_z[step]])
-            target_acc = np.array([self.ref_acc_x[step], self.ref_acc_y[step], self.ref_acc_z[step]])
+            step = min(iteration-TAKEOFF_TIME*self.CTRL_FREQ, len(self.ref_pos[0]) - 1)
+            target_pos = np.array([self.ref_pos[0][step], self.ref_pos[1][step], self.ref_pos[2][step]])
+            target_vel = np.array([self.ref_vel[0][step], self.ref_vel[1][step], self.ref_vel[2][step]])
+            target_acc = np.array([self.ref_acc[0][step], self.ref_acc[1][step], self.ref_acc[2][step]])
             target_yaw = 0.
             target_rpy_rates = np.zeros(3)
 
             command_type = Command(1)  # cmdFullState.
             args = [target_pos, target_vel, target_acc, target_yaw, target_rpy_rates]
             self.prev_args = args   
-
+            self.state = States.FOLLOWING_TRAJ
         elif iteration == (TAKEOFF_TIME + self.total_time)*self.CTRL_FREQ:
             command_type = Command(6)  # Notify setpoint stop.
             args = []
-
-        elif iteration == (TAKEOFF_TIME + self.total_time)*self.CTRL_FREQ+1:
-            x = self.ref_x[-1]
-            y = self.ref_y[-1]
-            z = 1.5 
+            self.state = States.FINISHED
+        elif iteration >= (TAKEOFF_TIME + self.total_time)*self.CTRL_FREQ+1:
+            x = self.ref_pos[0][-1]
+            y = self.ref_pos[1][-1]
+            z = self.ref_pos[2][-1]
             yaw = 0.
             duration = 2.5
 
             command_type = Command(5)  # goTo.
             args = [[x, y, z], yaw, duration, False]
-
-        elif iteration == (TAKEOFF_TIME + self.total_time)*self.CTRL_FREQ+1+3*self.CTRL_FREQ:
-            x = self.initial_obs[0]
-            y = self.initial_obs[2]
-            z = 1.5
-            yaw = 0.
-            duration = 6
-
-            command_type = Command(5)  # goTo.
-            args = [[x, y, z], yaw, duration, False]
-
+            self.state = States.FINISHED
         else:
             command_type = Command(0)  # None.
             args = []
-
+        
         return command_type, args
 
     def cmdSimOnly(self,

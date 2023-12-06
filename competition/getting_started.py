@@ -76,7 +76,7 @@ def run(config, test=False):
         obs, info = firmware_wrapper.reset()
         info['ctrl_timestep'] = CTRL_DT
         info['ctrl_freq'] = CTRL_FREQ
-        input(info)
+
         env = firmware_wrapper.env
     else:
         env = make('quadrotor', **config.quadrotor_config)
