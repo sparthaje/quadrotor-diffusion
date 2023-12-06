@@ -209,7 +209,6 @@ class Controller():
 
         #TODO(shreepa): formalize a way to compute the net trajectory using some kind of policy π(current_pos, next_gate, following_gate)
         #TODO(shreepa): work on gate spawning logic
-        #TODO(shreepa): add error from error
         #TODO(shreepa): split trajectory into multiple componenets
         
         for xyz in range(3):
@@ -223,7 +222,6 @@ class Controller():
         self.trajectory_reward = -self.total_time
 
         self.waypoints = np.array(waypoints)
-        self.errors = []
 
         if gui:
             # Draw the trajectory on PyBullet's GUI.
@@ -233,6 +231,8 @@ class Controller():
         self.state = States.PRE_LAUNCH
 
         self.prev_args = []
+        self.pos_errors = []
+        self.vel_errors = []
         #########################
         # REPLACE THIS (END) ####
         #########################
@@ -393,9 +393,8 @@ class Controller():
         if len(self.prev_args) == 0:
             return
         
-        ref_pos_error = self.prev_args[0] - np.array([obs[i] for i in [0,2,4]])
-        ref_vel_error = self.prev_args[1] - np.array([obs[i] for i in [1, 3, 5]])
-        self.errors.append((ref_pos_error, ref_vel_error))
+        self.pos_errors.append(self.prev_args[0] - np.array([obs[i] for i in [0,2,4]]))
+        self.vel_errors.append(self.prev_args[1] - np.array([obs[i] for i in [1, 3, 5]]))
 
         #########################
         # REPLACE THIS (END) ####

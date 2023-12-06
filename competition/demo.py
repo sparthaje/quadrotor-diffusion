@@ -29,7 +29,7 @@ if __name__ == "__main__":
 
   CONFIG_FACTORY = ConfigFactory()
   config = CONFIG_FACTORY.merge()
-  config["quadrotor_config"]["gui"] = False
+  config["quadrotor_config"]["gui"] = True
   config["quadrotor_config"]["gates"] = []
   
   # https://www.notion.so/Drone-Racing-429476c02eba498b9ba04e24b4a0f967?pvs=4#a625193707624b3e8a717e53655a934d
@@ -79,7 +79,7 @@ if __name__ == "__main__":
   env = firmware_wrapper.env
 
   vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
-  ctrl = Controller(vicon_obs, info, config.use_firmware, verbose=config.verbose, gui=False)
+  ctrl = Controller(vicon_obs, info, config.use_firmware, verbose=config.verbose, gui=True)
 
   action = np.zeros(4)
   cumulative_reward = 0
