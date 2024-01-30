@@ -58,6 +58,9 @@ if __name__ == "__main__":
   last_gate = np.array([config["quadrotor_config"]["gates"][-1][i] for i in range(3)])
   last_gate[2] = 0.525 if config["quadrotor_config"]["gates"][-1][6] == 0 else 0.3
   config["quadrotor_config"]["task_info"]["stabilization_goal"] = last_gate + 0.1 * final_exit_vector
+  
+  config["quadrotor_config"]["gates"] = []
+  config["quadrotor_config"]["task_info"]["stabilization_goal"] = np.array([1.4, 2, 0.3])
 
   CTRL_FREQ = config.quadrotor_config['ctrl_freq']
   CTRL_DT = 1/CTRL_FREQ
@@ -87,7 +90,7 @@ if __name__ == "__main__":
   info = {}
   ep_start = time.time()
   prev_state = ctrl.state
-  for i in range(CTRL_FREQ*(ctrl.total_time + 2)):
+  for i in range(CTRL_FREQ*(int(ctrl.total_time*1.5) + 2)):
     curr_time = i * CTRL_DT
     vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
     command_type, args = ctrl.cmdFirmware(curr_time, vicon_obs, cumulative_reward, done, info)

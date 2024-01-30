@@ -131,7 +131,7 @@ def run_one_environment(config, id, queue):
     env.close()
 
     cumulative_reward -= 10 * np.linalg.norm(sum(ctrl.pos_errors) / len(ctrl.pos_errors))
-    
+
     queue_item = ProcessInformation(id, config["quadrotor_config"]["gates"], cumulative_reward + ctrl.trajectory_reward)
     queue.put(queue_item)
 
@@ -143,7 +143,7 @@ if __name__ == "__main__":
 
     START = time.time()
 
-    num_processes = multiprocessing.cpu_count() - 11
+    num_processes = multiprocessing.cpu_count()
     processes = []
     data_queue = multiprocessing.Queue()
 

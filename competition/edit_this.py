@@ -120,6 +120,8 @@ class Controller():
         # Store a priori scenario information.
         self.NOMINAL_GATES = initial_info["nominal_gates_pos_and_type"]
         self.NOMINAL_OBSTACLES = initial_info["nominal_obstacles_pos"]
+        self.f = open("data.csv", "w")
+        self.f.write("t,x,y,z\n")
 
         # Check for pycffirmware.
         if use_firmware:
@@ -139,9 +141,10 @@ class Controller():
         # REPLACE THIS (START) ##
         #########################
 
-        self.takeoff_height = 0.3
+        self.takeoff_height = 0.525
         
         # this is the waypoint after takeoff
+        self.offset = np.array([self.initial_obs[0], self.initial_obs[2], 0])
         waypoints = [(self.initial_obs[0], self.initial_obs[2], self.takeoff_height)]
         boundaries = [
             [
@@ -201,16 +204,46 @@ class Controller():
                 sigma = np.array([b_0[1][xyz], b_f[1][xyz], b_0[2][xyz], b_f[2][xyz], b_0[3][xyz], b_f[3][xyz], b_0[4][xyz], b_f[4][xyz]])
                 coeff = calc_traj(sigma, b_f[0])
 
-                t = np.linspace(0, b_f[0], int(b_f[0] * 2 * self.CTRL_FREQ))
-                self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
-                self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
-                self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
+                t = np.linspace(0, b_f[0], int(b_f[0] * self.CTRL_FREQ))
+                # self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
+                # self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
+                # self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
             self.T.append(b_f[0])
+        
+        coeff_x = [[-0.001220703124999997, 0.017089843749999955, -0.08203124999999979, 0.1367187499999997, 0.0, 0.0, 0.0, 0.0],
+            [-0.06250000000000022, 0.43750000000000133, -1.0500000000000025, 0.8750000000000018, 0.0, 0.0, 0.0, 1.0],
+            ]  # [coefficients]
+        coeff_y = [[-0.001220703124999997, 0.017089843749999955, -0.08203124999999979, 0.1367187499999997, 0.0, 0.0, 0.0, 0.0],
+                [-0.15625000000000058, 1.0937500000000036, -2.625000000000007, 2.187500000000005, 0.0, 0.0, 0.0, 1.0],
+                
+                ]  # [coefficients]
+        coeff_z = [[0.0002746582031249994, -0.0038452148437499913, 0.018457031249999954, -0.030761718749999938, 0.0, 0.0, 0.0, 0.525],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3],
+                ]  # [coefficients]
+        self.T = [4, 2]
+        for seg in range(len(coeff_x)):
+            cx, cy, cz, T = coeff_x[seg], coeff_y[seg], coeff_z[seg], self.T[seg]
+            t_seg = np.linspace(0, T, self.CTRL_FREQ * T)
+            
+            self.ref_pos[0] = np.append(self.ref_pos[0], np.polyval(cx, t_seg))
+            self.ref_pos[1] = np.append(self.ref_pos[1], np.polyval(cy, t_seg))
+            self.ref_pos[2] = np.append(self.ref_pos[2], np.polyval(cz, t_seg))
+            
+            self.ref_vel[0] = np.append(self.ref_vel[0], np.polyval(np.polyder(cx, 1), t_seg))
+            self.ref_vel[1] = np.append(self.ref_vel[1], np.polyval(np.polyder(cy, 1), t_seg))
+            self.ref_vel[2] = np.append(self.ref_vel[2], np.polyval(np.polyder(cz, 1), t_seg))
+            
+            self.ref_acc[0] = np.append(self.ref_acc[0], np.polyval(np.polyder(cx, 2), t_seg))
+            self.ref_acc[1] = np.append(self.ref_acc[1], np.polyval(np.polyder(cy, 2), t_seg))
+            self.ref_acc[2] = np.append(self.ref_acc[2], np.polyval(np.polyder(cz, 2), t_seg))
+            
+        self.ref_pos[0] += self.offset[0]
+        self.ref_pos[1] += self.offset[1]
 
         #TODO(shreepa): formalize a way to compute the net trajectory using some kind of policy π(current_pos, next_gate, following_gate)
         #TODO(shreepa): work on gate spawning logic
         #TODO(shreepa): split trajectory into multiple componenets
-        
+        #TODO(shreepa): goto command gets sent way too early
         for xyz in range(3):
             assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz])
         
@@ -218,7 +251,7 @@ class Controller():
         assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
         assert len(self.ref_acc[0]) == len(self.ref_acc[1]) and len(self.ref_acc[1]) == len(self.ref_acc[2])
 
-        self.total_time = sum(self.T)
+        self.total_time = sum(self.T) * 2
         self.trajectory_reward = -self.total_time
 
         self.waypoints = np.array(waypoints)
@@ -273,7 +306,7 @@ class Controller():
 
         # Handwritten solution for GitHub's getting_stated scenario.
 
-        TAKEOFF_TIME = 3
+        TAKEOFF_TIME = 8
         # print(iteration)
         if iteration == 0:
             command_type = Command(2)  # Take-off.
@@ -294,7 +327,9 @@ class Controller():
             args = [target_pos, target_vel, target_acc, target_yaw, target_rpy_rates]
             self.prev_args = args   
             self.state = States.FOLLOWING_TRAJ
+            self.f.write(f"{time},{obs[0]},{obs[2]},{obs[4]}\n")
         elif iteration == (TAKEOFF_TIME + self.total_time)*self.CTRL_FREQ:
+            self.f.close()
             command_type = Command(6)  # Notify setpoint stop.
             args = []
             self.state = States.FINISHED
