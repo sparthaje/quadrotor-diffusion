@@ -247,7 +247,7 @@ def run_process(id, num_processes, iterations):
                       continue
                     test_case.optimal_velocity = optimal_v
                     test_case.optimal_time = optimal_t
-                    with open("/Users/shreepa/amr/safe-control-gym/train/data.csv", "a") as f:
+                    with open("../train/data.csv", "a") as f:
                       f.write(str(test_case) + "\n")
 
 def main():  
