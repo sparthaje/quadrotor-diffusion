@@ -1,10 +1,7 @@
-from copy import deepcopy
 import multiprocessing
 from functools import partial
-import random
 
 import numpy as np
-import tqdm
 from time import sleep
 
 from safe_control_gym.utils.configuration import ConfigFactory
@@ -78,7 +75,7 @@ class TestCase:
     self.optimal_time = None
   
   def __str__(self):
-    # returns all fields in class as a comma separated string
+    # returns all fields in class as a comma separated stringv 
     return f"{self.v},{self.theta_rel[0]},{self.z},{self.dist},{self.theta_rel[1]},{self.g1z},{self.end_dist},{self.theta_rel[2]},{self.g2z},{self.optimal_velocity},{self.optimal_time}"
 
 def run_env(test_case, bv, bt, gui=False):
@@ -98,9 +95,9 @@ def run_env(test_case, bv, bt, gui=False):
       [third_gate_pos[0], third_gate_pos[1], 0, 0, 0, test_case.end_theta, 1 if test_case.g2z == 0.3 else 0]
   ]
   
-  for x, y, _, _, _, _, _ in config["quadrotor_config"]["gates"]:
-    if not (-1.3 < x < 1.3) or not (-1.8 < y < 1.8):
-      return "Bad test case"
+  # for x, y, _, _, _, _, _ in config["quadrotor_config"]["gates"]:
+  #   if not (-1.3 < x < 1.3) or not (-1.8 < y < 1.8):
+  #     return "Bad test case"
   
   config["quadrotor_config"]["init_state"]["init_x"] = test_case.x
   config["quadrotor_config"]["init_state"]["init_y"] = test_case.y
@@ -209,13 +206,14 @@ def get_optimal_vals(test_case):
   best = (-float('inf'), -1, -1)
   for v in np.linspace(EXIT_VELOCITY_MIN, EXIT_VELOCITY_MAX, STEP):
     t_opt = 2 * test_case.dist / (v + test_case.v)
+    if v + test_case.v == 0:
+      t_opt = 1.3
     for t in np.linspace(0.5 * t_opt, 1.1 * t_opt, 7):
       reward = run_env(test_case, v, t, False)
       if reward == "Bad test case":
         return "Bad test case"
       if reward > best[0]:
         best = (reward, v, t)
-  print(best[0])
   return best[1], best[2]
 
 def run_process(id, num_processes, iterations):
@@ -271,5 +269,25 @@ def main():
   print("Data collection finished")
   
 if __name__ == "__main__":
-  main()
+  # main()
+  inps = [
+    # [0.0000, -0.7854,  0.5250,  1.0000,  0.6283,  0.5250,  1.5000,  1.2566, 0.3000],
+    # [1.8162, -0.1571,  0.5250,  1.5000,  1.2566,  0.3000,  1.0000,  1.2566, 0.3000],
+    # [0.5544, 1.0996, 0.3000, 1.0000, 1.2566, 0.3000, 1.5000, 1.0996, 0.5250],
+    # [1.4816, 2.3562, 0.3000, 1.5000, 1.0996, 0.5250, 1.0000, 0.0000, 0.5250]
+  ]
+  inps = [
+    #  [0.0000, -1.5708,  0.5250,  1.0000,  0.7854,  0.5250,  1.0000,  0.7854,
+    #      0.5250],
+    #  [ 1.4135, -0.7854,  0.5250,  1.0000,  0.7854,  0.5250,  1.0000,  0.0000,
+    #      0.5250],
+     [1.4725e+00, 1.1102e-16, 5.2500e-01, 1.0000e+00, 0.0000e+00, 5.2500e-01,
+        8.0000e-01, 0.0000e+00, 5.2500e-01]
+  ]
+  for inp in inps:
+    print(inp)
+    tc = TestCase(inp[2], inp[0], inp[1], inp[3], inp[4], inp[5], inp[6], inp[7], inp[8])
+    v,t = get_optimal_vals(tc)
+    # print("Search here: ", v, t)
+    run_env(tc, v, t, True)
 

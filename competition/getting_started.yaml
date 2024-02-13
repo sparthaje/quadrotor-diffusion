@@ -32,7 +32,7 @@ quadrotor_config:
   init_state:
     init_x: -1.25
     init_x_dot: 0
-    init_y: -1.75
+    init_y: -8  # -1.75
     init_y_dot: 0
     init_z: 0.03
     init_z_dot: 0
@@ -125,9 +125,9 @@ quadrotor_config:
       constrained_variable: state
       active_dims: [0, 2, 4] # The uncommented entries in the upper_bounds/lower_bounds vectors below
       upper_bounds:
-      - 1.5     # x
+      - 15     # x
       # - 100 # x_dot
-      - 2     # y
+      - 20     # y
       # - 100 # y_dot
       - 1     # z
       # - 100 # z_dot
@@ -138,9 +138,9 @@ quadrotor_config:
       # - 10  # q
       # - 10  # r
       lower_bounds:
-      - -1.5     # x
+      - -15     # x
       # - -100 # x_dot
-      - -2     # y
+      - -20     # y
       # - -100 # y_dot
       - -0.1   # z
       # - -100 # z_dot

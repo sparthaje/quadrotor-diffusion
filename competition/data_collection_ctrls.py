@@ -84,6 +84,41 @@ class Controller():
 
     """
     
+    def build_traj_with_boundaries(self, boundaries, gui=True):
+        waypoints = [b[1] for b in boundaries]
+        self.ref_pos = [[], [], []]
+        self.ref_vel = [[], [], []]
+        self.ref_acc = [[], [], []]
+        self.T = []
+
+        for index in range(len(boundaries) - 1):
+            b_0 = boundaries[index]
+            b_f = boundaries[index + 1]
+            for xyz in range(3):
+                sigma = np.array([b_0[1][xyz], b_f[1][xyz], b_0[2][xyz], b_f[2][xyz], b_0[3][xyz], b_f[3][xyz], b_0[4][xyz], b_f[4][xyz]])
+                coeff = calc_traj(sigma, b_f[0])
+
+                t = np.linspace(0, b_f[0], int(b_f[0] * self.CTRL_FREQ))
+                self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
+                self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
+                self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
+            self.T.append(b_f[0])
+
+        for xyz in range(3):
+            assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz])
+        
+        assert len(self.ref_pos[0]) == len(self.ref_pos[1]) and len(self.ref_pos[1]) == len(self.ref_pos[2])
+        assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
+        assert len(self.ref_acc[0]) == len(self.ref_acc[1]) and len(self.ref_acc[1]) == len(self.ref_acc[2])
+
+        self.total_time = sum(self.T)
+
+        if gui:
+            # Draw the trajectory on PyBullet's GUI.
+            draw_trajectory(self.initial_info, waypoints, self.ref_pos[0], self.ref_pos[1], self.ref_pos[2])
+            
+        return self.total_time, waypoints
+    
     def build_traj(self, test_case, v, t, gui=False):
         heights = [test_case.z, test_case.g1z, test_case.g2z]
         waypoints = [np.array([x[0], x[1], z]) for x, z in zip(self.NOMINAL_GATES, heights)]
@@ -135,7 +170,6 @@ class Controller():
             for xyz in range(3):
                 sigma = np.array([b_0[1][xyz], b_f[1][xyz], b_0[2][xyz], b_f[2][xyz], b_0[3][xyz], b_f[3][xyz], b_0[4][xyz], b_f[4][xyz]])
                 coeff = calc_traj(sigma, b_f[0])
-
                 t = np.linspace(0, b_f[0], int(b_f[0] * self.CTRL_FREQ))
                 self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
                 self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
