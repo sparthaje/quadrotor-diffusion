@@ -167,7 +167,8 @@ class FirmwareWrapper(BaseController):
         elif self.CONTROLLER == 'mellinger':
             firm.controllerMellingerInit()
             assert(self.firmware_freq == 500), "Mellinger controller requires a firmware frequency of 500Hz."
-            print('Mellinger controller init test:', firm.controllerMellingerTest())
+            # NOTE(shreepa): disabled this print cuz it spams too much when running a fuck ton of processes
+            # print('Mellinger controller init test:', firm.controllerMellingerTest())
         
         # Reset environment 
         init_obs, init_info = self.env.reset()
@@ -231,9 +232,15 @@ class FirmwareWrapper(BaseController):
                     p.getQuaternionFromEuler([0,0,0]),
                     physicsClientId=self.pyb_client)
 
+        # NOTE(shreepa): the default implementation for some reason returns the very last reward, done, info, and action
+        # after running a higher number of environment steps on the same action (prob to better simulate)
+        # this can have the affect of missing out on a crash if it happens in the middle of a tick 
+        # so imma just return the min reward (also possible to return average or median but i think min is best)
+        min_reward = float('inf')
         while self.tick / self.firmware_freq < sim_time + self.ctrl_dt:
             # Step the environment and print all returned information.
             obs, reward, done, info = self.env.step(action)
+            min_reward = min(reward, min_reward)
             
             # Get state values from pybullet
             cur_pos=np.array([obs[0], obs[2], obs[4]]) # global coord, m
@@ -292,7 +299,7 @@ class FirmwareWrapper(BaseController):
                 done = True
 
             self.action = action 
-        return obs, reward, done, info, action
+        return obs, min_reward, done, info, action
 
 
     def _update_initial_state(self, obs):
@@ -708,7 +715,7 @@ class FirmwareWrapper(BaseController):
     #endregion
 
 #region Utils 
-def _get_quaternion_from_euler(roll, pitch, yaw):
+def _get_quaternion_from_euler(roll, pitch, yaw):#
     """Convert an Euler angle to a quaternion.
     
     Args:

@@ -79,6 +79,7 @@ class States(Enum):
     FOLLOWING_TRAJ = 3
     FINISHED = 4
 
+REF_YAW_RATIO = 0.25
 class Controller():
     """Template controller class.
 
@@ -89,6 +90,7 @@ class Controller():
         self.ref_pos = [[], [], []]
         self.ref_vel = [[], [], []]
         self.ref_acc = [[], [], []]
+        self.ref_yaw = []
         self.T = []
 
         for index in range(len(boundaries) - 1):
@@ -102,10 +104,14 @@ class Controller():
                 self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
                 self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
                 self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
+            
+            total_steps = int(b_f[0] * self.CTRL_FREQ)
+            self.ref_yaw = np.append(self.ref_yaw, np.linspace(b_0[5], b_f[5], int(total_steps * REF_YAW_RATIO)))
+            self.ref_yaw = np.append(self.ref_yaw, np.full(total_steps - int(total_steps * REF_YAW_RATIO), b_f[5]))
             self.T.append(b_f[0])
 
         for xyz in range(3):
-            assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz])
+            assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz]) and len(self.ref_acc[xyz]) == len(self.ref_yaw)
         
         assert len(self.ref_pos[0]) == len(self.ref_pos[1]) and len(self.ref_pos[1]) == len(self.ref_pos[2])
         assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
@@ -129,6 +135,7 @@ class Controller():
             yaw_rot(test_case.theta) @ (test_case.v * INITIAL_GATE_EXIT),  # vel
             np.zeros(3),  # acc
             np.zeros(3),  # jerk
+            test_case.theta,  # yaw
         ])
         
         boundaries.append([
@@ -137,6 +144,7 @@ class Controller():
             yaw_rot(test_case.g_theta) @ (v * INITIAL_GATE_EXIT),
             np.zeros(3),
             np.zeros(3),
+            test_case.g_theta,
         ])
         
         """
@@ -150,18 +158,21 @@ class Controller():
         t = v0 / (v0^2 / 2d)
         t = 2d / v0  // same as what i did for mixnet LMAO
         """
-        v_f = 2 * test_case.end_dist / v if v != 0 else 2 * test_case.end_dist
+        t_f = 2 * test_case.end_dist / v if v != 0 else 2 * test_case.end_dist
+        # t_f = 2 * test_case.end_dist / (v + 0.5)
         boundaries.append([
-            v_f,
+            t_f,
             waypoints[2],
+            yaw_rot(test_case.end_theta) @ (0.1 * INITIAL_GATE_EXIT),
             np.zeros(3),
             np.zeros(3),
-            np.zeros(3),
+            test_case.end_theta,
         ])
         
         self.ref_pos = [[], [], []]
         self.ref_vel = [[], [], []]
         self.ref_acc = [[], [], []]
+        self.ref_yaw = []
         self.T = []
 
         for index in range(len(boundaries) - 1):
@@ -174,15 +185,21 @@ class Controller():
                 self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
                 self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
                 self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
+            total_steps = int(b_f[0] * self.CTRL_FREQ)
+            self.ref_yaw = np.append(self.ref_yaw, np.linspace(b_0[5], b_f[5], int(total_steps * REF_YAW_RATIO)))
+            self.ref_yaw = np.append(self.ref_yaw, np.full(total_steps - int(total_steps * REF_YAW_RATIO), b_f[5]))
             self.T.append(b_f[0])
 
         for xyz in range(3):
-            assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz])
+            assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz]) and len(self.ref_acc[xyz]) == len(self.ref_yaw)
         
         assert len(self.ref_pos[0]) == len(self.ref_pos[1]) and len(self.ref_pos[1]) == len(self.ref_pos[2])
         assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
         assert len(self.ref_acc[0]) == len(self.ref_acc[1]) and len(self.ref_acc[1]) == len(self.ref_acc[2])
-
+        
+        # x = [np.array([x, y, z]) for x, y, z in zip(self.ref_pos[0], self.ref_pos[1], self.ref_pos[2])]
+        # print("Traj Length", sum([np.linalg.norm(x[i+1] - x[i]) for i in range(len(x) - 1)]))
+        
         self.total_time = sum(self.T)
 
         if gui:
@@ -264,8 +281,10 @@ class Controller():
             step = min(iteration, len(self.ref_pos[0]) - 1)
             target_pos = np.array([self.ref_pos[0][step], self.ref_pos[1][step], self.ref_pos[2][step]])
             target_vel = np.array([self.ref_vel[0][step], self.ref_vel[1][step], self.ref_vel[2][step]])
-            target_acc = np.array([self.ref_acc[0][step], self.ref_acc[1][step], self.ref_acc[2][step]])
-            target_yaw = 0.
+            target_acc = np.array([self.ref_acc[0][step], self.ref_acc[1][step], self.ref_acc[2][step]])            
+            # target_yaw = self.initial_obs[8] #+ np.pi/2
+            # target_yaw = np.arctan2(np.sin(target_yaw), np.cos(target_yaw))
+            target_yaw = self.ref_yaw[step]
             target_rpy_rates = np.zeros(3)
 
             command_type = Command(1)  # cmdFullState.

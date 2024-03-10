@@ -42,13 +42,14 @@ gate_theta = [-0.7853981633974483, -0.15707963267948966, 1.0995574287564276, 2.3
 d_vals = [0, 1.0, 1.5, 1.0, 1.5, 1.0, 1.0]
 rel_angles = [-0.7853981633974483, 0.6283185307179586, 1.2566370614359172, 1.2566370614359172, 1.0995574287564276, 0.0, 0.0]
 
-gate_x = [-1.0, 0.0, 0.7071067811865475, 0.7071067811865474, 0.7071067811865472, 0.7071067811865471]
-gate_y = [-1.75, -1.75, -1.0428932188134523, -0.042893218813452316, 0.7571067811865477, 1.5571067811865478]
-gate_z = [0, 0, 0, 0, 0, 0]
-heights = [0.525, 0.525, 0.525, 0.525, 0.525, 0.525]
-gate_theta = [-1.5707963267948966, -0.7853981633974482, 1.1102230246251565e-16, 1.1102230246251565e-16, 1.1102230246251565e-16, 1.1102230246251565e-16]
-d_vals = [0, 1.0, 1.0, 1.0, 0.8, 0.8]
-rel_angles = [-1.5707963267948966, 0.7853981633974483, 0.7853981633974483, 0.0, 0.0, 0.0]
+# straight shot
+# gate_x = [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+# gate_y = [-1.75, -0.95, -0.1499999999999999, 0.6500000000000001, 1.4500000000000002, 2.25]
+# gate_z = [0, 0, 0, 0, 0, 0]
+# heights = [0.525, 0.525, 0.525, 0.525, 0.525, 0.525]
+# gate_theta = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+# d_vals = [0, 0.8, 0.8, 0.8, 0.8, 0.8]
+# rel_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 gate_x = gate_x[:-2]
 gate_y = gate_y[:-2]
@@ -60,7 +61,7 @@ heights = [(heights[i], heights[i+1], heights[i+2]) for i in range(len(gate_x))]
 
 # assert that all the lists have the same length
 assert len(gate_x) == len(gate_y) == len(gate_z) == len(gate_theta) == len(d_vals) == len(rel_angles) == len(heights), "All lists must have the same length"
-
+optimal_vals = [(1.7777777777777777, 0.5625), (0.4444444444444444, 1.0799999999999998), (1.5555555555555554, 0.6000000000000001), (1.5555555555555554, 0.5785714285714286)]
 model = BoundaryPredictor()
 # model.load_state_dict(torch.load('../models/model.pth'))
 # model.load_state_dict(torch.load('../models/model-20240202-211827.pth'))
@@ -73,7 +74,8 @@ boundary_conditions.append([
   np.array([gate_x[0], gate_y[0], heights[0][0]]),
   np.zeros(3),
   np.zeros(3),
-  np.zeros(3)
+  np.zeros(3),
+  gate_theta[0],
 ])
 
 i = 0
@@ -91,9 +93,11 @@ for gx, gy, gz, h, gt, d, ra in list(zip(gate_x, gate_y, gate_z, heights, gate_t
     ra[2],  # ra_2,
     h[2],  # z_2
   ])
+  print(list(inputs))
 
-  inputs = torch.tensor(inputs, dtype=torch.float32)
-  v, t = model(inputs).detach().numpy()
+  # inputs = torch.tensor(inputs, dtype=torch.float32)
+  # v, t = model(inputs).detach().numpy()
+  v, t = optimal_vals[i]
   print(inputs, v, t)
   print('-----')
   
@@ -103,6 +107,7 @@ for gx, gy, gz, h, gt, d, ra in list(zip(gate_x, gate_y, gate_z, heights, gate_t
     yaw_rot(gt) @ (v * INITIAL_GATE_EXIT),
     np.zeros(3),
     np.zeros(3),
+    np.arctan2(np.sin(ra[1] + gt), np.cos(ra[1] + gt)),
   ])
   i += 1
   
@@ -114,7 +119,8 @@ boundary_conditions.append([
   END,
   np.zeros(3),
   np.zeros(3),
-  np.zeros(3)
+  np.zeros(3),
+  gate_theta[-1],
 ])
 
 print("--------------------")
@@ -125,120 +131,117 @@ for b in boundary_conditions:
   print("--------------------")
   print()
 
-for i in range(1):
-  CONFIG_FACTORY = ConfigFactory()
-  config = CONFIG_FACTORY.merge()
-  config["quadrotor_config"]["gui"] = True
-  config["quadrotor_config"]["gates"] = []
-  config["quadrotor_config"]["obstacles"] = []
+CONFIG_FACTORY = ConfigFactory()
+config = CONFIG_FACTORY.merge()
+config["quadrotor_config"]["gui"] = True
+config["quadrotor_config"]["gates"] = []
+config["quadrotor_config"]["obstacles"] = []
 
-  config["quadrotor_config"]["gates"] = [ #]
-    [gx, gy, 0, 0, 0, gt, gz] for gx, gy, gz, gt in list(zip(gate_x, gate_y, gate_z, gate_theta))[1:]
-  ]
+config["quadrotor_config"]["gates"] = [ # ]
+  [gx, gy, 0, 0, 0, gt, gz] for gx, gy, gz, gt in list(zip(gate_x, gate_y, gate_z, gate_theta))[1:]
+]
 
-  config["quadrotor_config"]["init_state"]["init_x"] = boundary_conditions[0][1][0]
-  config["quadrotor_config"]["init_state"]["init_y"] = boundary_conditions[0][1][1]
-  config["quadrotor_config"]["init_state"]["init_z"] = boundary_conditions[0][1][2]
-  velocity_vec = np.zeros(3)
-  config["quadrotor_config"]["init_state"]["init_x_dot"] = velocity_vec[0]
-  config["quadrotor_config"]["init_state"]["init_y_dot"] = velocity_vec[1]
-  config["quadrotor_config"]["init_state"]["init_z_dot"] = velocity_vec[2]
+config["quadrotor_config"]["init_state"]["init_x"] = boundary_conditions[0][1][0]
+config["quadrotor_config"]["init_state"]["init_y"] = boundary_conditions[0][1][1]
+config["quadrotor_config"]["init_state"]["init_z"] = boundary_conditions[0][1][2]
+velocity_vec = np.zeros(3)
+config["quadrotor_config"]["init_state"]["init_x_dot"] = velocity_vec[0]
+config["quadrotor_config"]["init_state"]["init_y_dot"] = velocity_vec[1]
+config["quadrotor_config"]["init_state"]["init_z_dot"] = velocity_vec[2]
 
-  config["quadrotor_config"]["init_state"]["init_psi"] = gate_theta[0]
+config["quadrotor_config"]["init_state"]["init_psi"] = 0.1  # gate_theta[0]
+  
+config["quadrotor_config"]["task_info"]["stabilization_goal"] = END
+CTRL_FREQ = config.quadrotor_config['ctrl_freq']
+CTRL_DT = 1/CTRL_FREQ
+
+FIRMWARE_FREQ = 500
+assert(config.quadrotor_config['pyb_freq'] % FIRMWARE_FREQ == 0), "pyb_freq must be a multiple of firmware freq"
+config.quadrotor_config['ctrl_freq'] = FIRMWARE_FREQ
+
+env_func = partial(make, 'quadrotor', **config.quadrotor_config)
+firmware_wrapper = make('firmware',
+            env_func, FIRMWARE_FREQ, CTRL_FREQ
+            ) 
+
+obs, info = firmware_wrapper.reset()
+info['ctrl_timestep'] = CTRL_DT
+info['ctrl_freq'] = CTRL_FREQ
+
+env = firmware_wrapper.env
+
+vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
+ctrl = Controller(vicon_obs, info, config.use_firmware, verbose=config.verbose)
+total_time, waypoints = ctrl.build_traj_with_boundaries(boundary_conditions)
+visited = set()
+bases = []
+
+for theta in gate_theta:
+  y = yaw_rot(theta) @ INITIAL_GATE_EXIT
+  x = yaw_rot(theta - np.pi/2) @ INITIAL_GATE_EXIT
+  z = np.cross(x, y)
+  matrix = np.array([x, y, z]).T
+  bases.append(np.linalg.inv(matrix))  
+
+action = np.zeros(4)
+cumulative_reward = 0
+info = {}
+prev_state = ctrl.state
+prev_args = None
+total_deviation = 0
+total_dist = 0
+
+for i in range(int(CTRL_FREQ*(ctrl.total_time + 2))):
+    curr_time = i * CTRL_DT
+    vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
+    command_type, args = ctrl.cmdFirmware(curr_time)
+
+    if command_type == Command.FULLSTATE:
+        firmware_wrapper.sendFullStateCmd(*args, curr_time)
+    elif command_type == Command.TAKEOFF:
+        firmware_wrapper.sendTakeoffCmd(*args)
+    elif command_type == Command.LAND:
+        firmware_wrapper.sendLandCmd(*args)
+    elif command_type == Command.STOP:
+        firmware_wrapper.sendStopCmd()
+    elif command_type == Command.GOTO:
+        firmware_wrapper.sendGotoCmd(*args)
+    elif command_type == Command.NOTIFYSETPOINTSTOP:
+        firmware_wrapper.notifySetpointStop()
+    elif command_type == Command.NONE:
+        pass
+    else:
+        raise ValueError("[ERROR] Invalid command_type.")
+
+    obs, reward, _, info, action = firmware_wrapper.step(curr_time, action)
+    if command_type == Command.FULLSTATE and prev_args is not None:
+      total_deviation += np.linalg.norm(args[0] - np.array([obs[0], obs[2], obs[4]]))
+      total_dist += np.linalg.norm(args[0] - prev_args[0])
     
-  config["quadrotor_config"]["task_info"]["stabilization_goal"] = END
-  CTRL_FREQ = config.quadrotor_config['ctrl_freq']
-  CTRL_DT = 1/CTRL_FREQ
+    for waypoint, matrix in zip(waypoints, bases):
+      error = waypoint - np.array([obs[0], obs[2], obs[4]])
+      error = matrix @ error  # convert to frame with respect to gate
+      if np.abs(error[0]) < 0.2 and np.abs(error[2]) < 0.2 and np.abs(error[1]) < 0.1:
+        visited.add(",".join(str(x) for x in waypoint))
+    
+    # whatever rewards accumulated before following trajectory should be ignored
+    # as we are just utilizing out of box crazyflie tools (i.e. takeoff)
+    if ctrl.state == States.FOLLOWING_TRAJ and prev_state == States.TAKEOFF:
+        cumulative_reward = 0
+        
+    cumulative_reward += reward
 
-  FIRMWARE_FREQ = 500
-  assert(config.quadrotor_config['pyb_freq'] % FIRMWARE_FREQ == 0), "pyb_freq must be a multiple of firmware freq"
-  config.quadrotor_config['ctrl_freq'] = FIRMWARE_FREQ
+    prev_state = ctrl.state
+    prev_args = args
 
-  env_func = partial(make, 'quadrotor', **config.quadrotor_config)
-  firmware_wrapper = make('firmware',
-              env_func, FIRMWARE_FREQ, CTRL_FREQ
-              ) 
+env.close()
 
-  obs, info = firmware_wrapper.reset()
-  info['ctrl_timestep'] = CTRL_DT
-  info['ctrl_freq'] = CTRL_FREQ
+skipped_waypoints = len(waypoints) - len(visited)
+average_error = total_deviation / int(CTRL_FREQ*(ctrl.total_time))
+error_reward = 0 if average_error < 0.25 else -10
 
-  env = firmware_wrapper.env
-
-  vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
-  ctrl = Controller(vicon_obs, info, config.use_firmware, verbose=config.verbose)
-  total_time, waypoints = ctrl.build_traj_with_boundaries(boundary_conditions)
-  visited = set()
-  bases = []
-
-  for theta in gate_theta:
-    y = yaw_rot(theta) @ INITIAL_GATE_EXIT
-    x = yaw_rot(theta - np.pi/2) @ INITIAL_GATE_EXIT
-    z = np.cross(x, y)
-    matrix = np.array([x, y, z]).T
-    bases.append(np.linalg.inv(matrix))  
-
-  action = np.zeros(4)
-  cumulative_reward = 0
-  info = {}
-  prev_state = ctrl.state
-  prev_args = None
-  total_deviation = 0
-  total_dist = 0
-
-  for i in range(int(CTRL_FREQ*(ctrl.total_time + 2))):
-      curr_time = i * CTRL_DT
-      vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
-      command_type, args = ctrl.cmdFirmware(curr_time)
-
-      if command_type == Command.FULLSTATE:
-          firmware_wrapper.sendFullStateCmd(*args, curr_time)
-      elif command_type == Command.TAKEOFF:
-          firmware_wrapper.sendTakeoffCmd(*args)
-      elif command_type == Command.LAND:
-          firmware_wrapper.sendLandCmd(*args)
-      elif command_type == Command.STOP:
-          firmware_wrapper.sendStopCmd()
-      elif command_type == Command.GOTO:
-          firmware_wrapper.sendGotoCmd(*args)
-      elif command_type == Command.NOTIFYSETPOINTSTOP:
-          firmware_wrapper.notifySetpointStop()
-      elif command_type == Command.NONE:
-          pass
-      else:
-          raise ValueError("[ERROR] Invalid command_type.")
-
-      obs, reward, _, info, action = firmware_wrapper.step(curr_time, action)
-      if command_type == Command.FULLSTATE and prev_args is not None:
-        total_deviation += np.linalg.norm(args[0] - np.array([obs[0], obs[2], obs[4]]))
-        total_dist += np.linalg.norm(args[0] - prev_args[0])
-      
-      for waypoint, matrix in zip(waypoints, bases):
-        error = waypoint - np.array([obs[0], obs[2], obs[4]])
-        error = matrix @ error  # convert to frame with respect to gate
-        if np.abs(error[0]) < 0.2 and np.abs(error[2]) < 0.2 and np.abs(error[1]) < 0.1:
-          visited.add(",".join(str(x) for x in waypoint))
-      
-      # whatever rewards accumulated before following trajectory should be ignored
-      # as we are just utilizing out of box crazyflie tools (i.e. takeoff)
-      if ctrl.state == States.FOLLOWING_TRAJ and prev_state == States.TAKEOFF:
-          cumulative_reward = 0
-          
-      cumulative_reward += reward
-      if cumulative_reward < 0:
-        break
-
-      prev_state = ctrl.state
-      prev_args = args
-
-  env.close()
-
-  skipped_waypoints = len(waypoints) - len(visited)
-  average_error = total_deviation / int(CTRL_FREQ*(ctrl.total_time))
-  error_reward = 0 if average_error < 0.25 else -10
-
-  print(cumulative_reward)
-  print(ctrl.total_time) 
-  print(-100*skipped_waypoints)
-  print(error_reward)
-  print("--------------------")
+print("Crash cost: ", cumulative_reward)
+print("Time to complete course: ", ctrl.total_time) 
+print("Skpped waypoints: ", -100*skipped_waypoints)
+print("Cost from tracking error: ", average_error)
+print("--------------------")

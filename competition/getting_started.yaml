@@ -38,7 +38,7 @@ quadrotor_config:
     init_z_dot: 0
     init_phi: 0
     init_theta: 0
-    init_psi: 0
+    init_psi:  -1.5708
     init_p: 0
     init_q: 0
     init_r: 0
@@ -108,12 +108,12 @@ quadrotor_config:
   gates_and_obstacles_randomization_info:
     gates:
       distrib: "uniform"
-      low: -0.1
-      high: 0.1
+      low: 0.0
+      high: 0.0
     obstacles:
       distrib: "uniform"
-      low: -0.1
-      high: 0.1
+      low: 0.0
+      high: 0.0
 
   # Constraints
   constraints:

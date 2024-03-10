@@ -943,10 +943,11 @@ class Quadrotor(BaseAviary):
             #     reward += 100
             # Penalize by collision.
             if self.currently_collided:
-                reward -= 1000.001
+                reward -= 1
             # Penalize by constraint violation.
             if self.cnstr_violation:
-                reward -= 1000.0000001
+                # print("CNSTR violation")
+                reward -= 0
             # Penalize by loss from X_GOAL, U_GOAL state.
             # reward += float(-1 * self.symbolic.loss(x=self.state,
             #                                         Xr=self.X_GOAL,
