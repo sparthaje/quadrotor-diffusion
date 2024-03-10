@@ -286,7 +286,6 @@ def split_list(lst, n):
 
 def run_process(id, num_processes):
   test_case_list = []
-  zero_min_vel_list = []
   # loop through starting velocities: v0 in header
   for v in np.linspace(MIN_VELOCITY, MAX_VELOCITY, DV):
     # loop through second gate arrangements: d1 and theta1 in header
@@ -300,16 +299,10 @@ def run_process(id, num_processes):
               for g1z in [0.3, 0.525]:
                 for g2z in [0.3, 0.525]:
                   test_case = TestCase(z, v, dist, g_theta, g1z, end_dist, end_theta, g2z)
-                  # Test cases all get added to a list, initial velocity being zero is 
-                  # considered a special case (explained further below)
-                  if v == 0:
-                    zero_min_vel_list.append(test_case)
-                  else:
-                    test_case_list.append(test_case)
+                  test_case_list.append(test_case)
     
   random.seed(42)
   random.shuffle(test_case_list)
-  random.shuffle(zero_min_vel_list)
   
   # shuffle both lists with the same random seed across all processes
   # split both lists into num_processes chunks and only process the chunk
@@ -319,7 +312,7 @@ def run_process(id, num_processes):
   # empirically the neural network performs worse with initial velocities of zero, so I want
   # all that data to be included int he data set
 
-  to_process = split_list(zero_min_vel_list, num_processes)[id] + split_list(test_case_list, num_processes)[id]
+  to_process = split_list(test_case_list, num_processes)[id]
   
   for test_case in to_process:
     output = get_optimal_vals(test_case)
