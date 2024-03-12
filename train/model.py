@@ -1,9 +1,9 @@
 from torch import nn
 
 class BoundaryPredictor(nn.Module):
-  def __init__(self):
+  def __init__(self, inp_dim):
     super().__init__()
-    self.hidden1 = nn.Linear(9, 256)
+    self.hidden1 = nn.Linear(inp_dim, 256)
     self.activation1 = nn.LeakyReLU(negative_slope=0.01)
     
     self.hidden2 = nn.Linear(256, 256)

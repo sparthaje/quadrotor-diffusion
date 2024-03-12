@@ -292,7 +292,7 @@ def run_process(id, num_processes):
     for dist in np.linspace(MIN_DISTANCE, MAX_DISTANCE, D_D):
       for g_theta in np.linspace(MIN_GATE_THETA, MAX_GATE_THETA, D_GATE_THETA):
         # loop through third gate arrangements: d2 and theta2 in header
-        for end_dist in np.linspace(MIN_END_DISTANCE, MAX_END_DISTANCE, D_D):
+        for end_dist in np.linspace(MIN_END_DISTANCE, MAX_END_DISTANCE, D_END):
           for end_theta in np.linspace(MIN_END_THETA, MAX_END_THETA, D_END_THETA):
             # loop through z0, z1, and z2 in header
             for z in [0.3, 0.525]:

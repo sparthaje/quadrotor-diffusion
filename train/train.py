@@ -10,12 +10,16 @@ import datetime
 
 from model import BoundaryPredictor
 
-# Load the dataset
-dataset = pd.read_csv('data.csv')
-dataset.loc[dataset['best_v'] == 0, 'best_v'] += 0.2
+# Replace 0.0 for optimal velocity with a small value
+ZERO_EQ = 0.0
 
-X = dataset.iloc[:, 0:9].values
-y = dataset.iloc[:, 9:].values
+# Load the dataset
+dataset = pd.read_csv('data-20k.csv')
+dataset.loc[dataset['best_v'] == 0, 'best_v'] = ZERO_EQ
+print(sum(dataset['best_v'] == 0))
+
+X = dataset.iloc[:, 0:8].values
+y = dataset.iloc[:, 8:].values
 
 # Convert the data to tensors
 X = torch.tensor(X, dtype=torch.float32)
@@ -29,7 +33,8 @@ print(f'X_test shape: {X_test.shape}')
 # Define the model
 input_size = X.shape[1]
 output_size = y.shape[1]
-model = BoundaryPredictor()
+print(input_size, output_size)
+model = BoundaryPredictor(input_size)
 
 print(model)
 
@@ -46,7 +51,6 @@ class CustomLoss(torch.nn.Module):
 # Create an instance of the custom loss function
 criterion = CustomLoss()
 criterion_test = CustomLoss()
-# optimizer = optim.SGD(model.parameters(), lr=0.01)
 optimizer = optim.Adam(model.parameters(), lr=0.01)
 
 # Train the model
@@ -75,11 +79,11 @@ torch.save(model.state_dict(), f'../models/model-{timestamp}.pth')
 
 print()
 err = []
-a, b = 0, 1
+a, b = 0, 0
 for x, y in zip(X_test, y_test):
   pred = model(x).detach().numpy()
   y = y.detach().numpy()
-  if y[0] == 0:
+  if np.isclose(y[0], ZERO_EQ, atol=1e-3):
     a += pred[0]
     b += 1
     continue
@@ -91,17 +95,34 @@ for x, y in zip(X_test, y_test):
 
 err_0 = [item[0] for item in err]
 err_1 = [item[1] for item in err]
-print("average velocity predicted when it should be 0 in test:", a/b)
+if b != 0:
+  print(f"average velocity predicted when it should be {ZERO_EQ} in test: {a/b}, examples {b}")
 
-plt.boxplot([err_0, err_1], labels=['Velocity Prediction % Error', 'Time Prediction % Error'])
-plt.xlabel('Index')
-plt.ylabel('Error')
-plt.title('Boxplot of Errors Excluding truth labels with 0 velocity')
-plt.savefig('boxplot.png')
+# Plot Velocity Prediction % Error and Time Prediction % Error in the same figure
+plt.figure(figsize=(10, 5))
+
+# Plot Velocity Prediction % Error
+plt.subplot(1, 2, 1)
+plt.hist(err_0, bins=20, color='blue', alpha=0.7, label='Velocity Prediction')
+plt.xlabel('Velocity Prediction % Error')
+plt.ylabel('Frequency')
+plt.yscale('log')  # Set y-axis to log scale
+
+# Plot Time Prediction % Error
+plt.subplot(1, 2, 2)
+plt.hist(err_1, bins=20, color='green', alpha=0.7, label='Time Prediction')
+plt.xlabel('Time Prediction % Error')
+plt.ylabel('Frequency')
+plt.yscale('log')  # Set y-axis to log scale
+
+plt.suptitle('Histogram of Velocity and Time Prediction % Errors')
+plt.legend()
+plt.savefig('test_dataset_histogram.png')
 plt.close()
 
-model_graph = draw_graph(model, input_size=(1,9), expand_nested=True)
-model_graph.visual_graph.render("computation_graph", format="png")
+
+# model_graph = draw_graph(model, input_size=(1,8), expand_nested=True)
+# model_graph.visual_graph.render("computation_graph", format="png")
 
 plt.plot(list(range(num_epochs)), loss_list, label='Training Loss')
 plt.plot(list(range(num_epochs)), test_loss_list, label='Test Loss')
@@ -112,22 +133,22 @@ plt.legend()
 plt.savefig('loss.png')
 plt.close()
 
-dataset = pd.read_csv('data.csv')
-dataset.loc[dataset['best_v'] == 0, 'best_v'] += 0.2
+dataset = pd.read_csv('data-90k.csv')
+dataset.loc[dataset['best_v'] == 0, 'best_v'] = ZERO_EQ
 
-X = dataset.iloc[:, 0:9].values
-y = dataset.iloc[:, 9:].values
+X = dataset.iloc[:, 0:input_size].values
+y = dataset.iloc[:, input_size:].values
 
-# Convert the data to tensors
+# # Convert the data to tensors
 X = torch.tensor(X, dtype=torch.float32)
 y = torch.tensor(y, dtype=torch.float32)
 err = []
-a, b = 0, 1
+a, b = 0, 0
 for x, y in zip(X, y):
   pred = model(x).detach().numpy()
   y = y.detach().numpy()
-  if y[0] == 0.2:
-    a += pred[0] - 0.2
+  if np.isclose(y[0], ZERO_EQ, atol=1e-3):
+    a += pred[0]
     b += 1
     continue
   
@@ -138,11 +159,27 @@ for x, y in zip(X, y):
 
 err_0 = [item[0] for item in err]
 err_1 = [item[1] for item in err]
+if b != 0:
+  print(f"average velocity predicted when it should be {ZERO_EQ} in full dataset: {a/b}, examples {b}")
 
-plt.boxplot([err_0, err_1], labels=['Velocity Prediction % Error', 'Time Prediction % Error'])
-plt.xlabel('Index')
-plt.ylabel('Error')
-plt.title('Boxplot of Errors Excluding truth labels with 0 velocity')
-plt.savefig('boxplot_all.png')
+# Plot Velocity Prediction % Error and Time Prediction % Error in the same figure
+plt.figure(figsize=(10, 5))
+
+# Plot Velocity Prediction % Error
+plt.subplot(1, 2, 1)
+plt.hist(err_0, bins=20, color='blue', alpha=0.7, label='Velocity Prediction')
+plt.xlabel('Velocity Prediction % Error')
+plt.ylabel('Frequency')
+plt.yscale('log')  # Set y-axis to log scale
+
+# Plot Time Prediction % Error
+plt.subplot(1, 2, 2)
+plt.hist(err_1, bins=20, color='green', alpha=0.7, label='Time Prediction')
+plt.xlabel('Time Prediction % Error')
+plt.ylabel('Frequency')
+plt.yscale('log')  # Set y-axis to log scale
+
+plt.suptitle('Histogram of Velocity and Time Prediction Errors')
+plt.legend()
+plt.savefig('fulldataset_histogram.png')
 plt.close()
-print("average velocity predicted when it should be 0 in entire dataset:", a/b)
