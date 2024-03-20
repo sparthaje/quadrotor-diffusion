@@ -25,31 +25,24 @@ def newest_file_in_directory(directory):
         return None  # Return None if directory is empty
 
     # Get file paths along with their modification times
-    files_with_times = [(os.path.join(directory, file), os.path.getmtime(os.path.join(directory, file))) for file in files]
+    files_with_times = [(os.path.join(directory, file), os.path.getmtime(os.path.join(directory, file))) for file in files if ".DS_Store" not in file]
 
     # Sort files based on modification time, newest first
     newest_file = max(files_with_times, key=lambda x: x[1])
 
     return newest_file[0]  # Return the path of the newest file
 
+RENDER_GATES = False
+
 # Copied from `build_supervised_demo.py`
 # NOTE(shreepa): MAKE SURE THAT THE FIRST GATE IS TAKEOFF POSITION AND LAST TWO GATES ARE DUMMY GATES WHEN RUNNING BUILD DEMO
-gate_x = [0.0, 0.7071067811865475, 0.9417584787468938, 0.05075195455852588, -1.0099082172212954, -0.7008912228463483, -0.3918742284714012]
-gate_y = [-1.75, -1.0428932188134525, 0.4386392920792541, 0.892629791818801, -0.16803037996102022, -1.119086896256174, -2.0701434125513276]
-gate_z = [0, 0, 1, 1, 0, 0, 0]
-heights = [0.525, 0.525, 0.3, 0.3, 0.525, 0.525, 0.525]
-gate_theta = [-0.7853981633974483, -0.15707963267948966, 1.0995574287564276, 2.356194490192345, -2.8274333882308142, -2.8274333882308142, -2.8274333882308142]
-d_vals = [0, 1.0, 1.5, 1.0, 1.5, 1.0, 1.0]
-rel_angles = [-0.7853981633974483, 0.6283185307179586, 1.2566370614359172, 1.2566370614359172, 1.0995574287564276, 0.0, 0.0]
-
-# straight shot
-# gate_x = [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
-# gate_y = [-1.75, -0.95, -0.1499999999999999, 0.6500000000000001, 1.4500000000000002, 2.25]
-# gate_z = [0, 0, 0, 0, 0, 0]
-# heights = [0.525, 0.525, 0.525, 0.525, 0.525, 0.525]
-# gate_theta = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-# d_vals = [0, 0.8, 0.8, 0.8, 0.8, 0.8]
-# rel_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+gate_x = [-1.0, -1.0, -0.3891503010995544, 0.662417714953082, 1.86182558739196, 2.875019097994378, 3.3290095977339242, 3.7830000974734705]
+gate_y = [-1.75, -0.55, 0.4828904324047323, 1.0609948413267904, 1.0233019304330362, 0.38030977645823993, -0.5106967477301281, -1.401703271918496]
+gate_z = [0, 0, 0, 0, 0, 0, 0, 0]
+heights = [0.525, 0.525, 0.525, 0.525, 0.525, 0.525, 0.525, 0.525]
+gate_theta = [0.0, -0.5340707511102648, -1.0681415022205298, -1.6022122533307948, -2.1362830044410597, -2.6703537555513246, -2.6703537555513246, -2.6703537555513246]
+d_vals = [0, 1.2, 1.2, 1.2, 1.2, 1.2, 1.0, 1.0]
+rel_angles = [0.0, -0.5340707511102649, -0.5340707511102649, -0.5340707511102649, -0.5340707511102649, -0.5340707511102649, 0.0, 0.0]
 
 gate_x = gate_x[:-2]
 gate_y = gate_y[:-2]
@@ -61,10 +54,10 @@ heights = [(heights[i], heights[i+1], heights[i+2]) for i in range(len(gate_x))]
 
 # assert that all the lists have the same length
 assert len(gate_x) == len(gate_y) == len(gate_z) == len(gate_theta) == len(d_vals) == len(rel_angles) == len(heights), "All lists must have the same length"
-optimal_vals = [(1.7777777777777777, 0.5625), (0.4444444444444444, 1.0799999999999998), (1.5555555555555554, 0.6000000000000001), (1.5555555555555554, 0.5785714285714286)]
-model = BoundaryPredictor()
-# model.load_state_dict(torch.load('../models/model.pth'))
-# model.load_state_dict(torch.load('../models/model-20240202-211827.pth'))
+optimal_vals = None
+model = BoundaryPredictor(8)
+model.eval()
+print(newest_file_in_directory("../models"))
 model.load_state_dict(torch.load(newest_file_in_directory("../models")))
 model.eval()
 
@@ -79,26 +72,29 @@ boundary_conditions.append([
 ])
 
 i = 0
+print("Inputs normalized, outputs not normalized")
 for gx, gy, gz, h, gt, d, ra in list(zip(gate_x, gate_y, gate_z, heights, gate_theta, d_vals, rel_angles))[:-1]:
+  # v0,z0,d1,theta1,z1,d2,theta2,z2,best_v,best_t
   inputs = np.array([
-    np.linalg.norm(boundary_conditions[-1][2]),  # v_0
-    gt,  # theta_0,
-    h[0],  # z_0
+    np.linalg.norm(boundary_conditions[-1][2]) / 2.0,  # v_0
+    (h[0] == 0.3) * 1.0,  # z_0
     
-    d[1],  # d_1
-    ra[1],  # ra_1
-    h[1],  # z_1
+    (d[1] - 0.8) / (1.5 - 0.8),  # d_1
+    ra[1] / (np.pi /4),  # ra_1
+    (h[1] == 0.3) * 1.0,  # z_1
     
-    d[2],  # d_2,
-    ra[2],  # ra_2,
-    h[2],  # z_2
+    (d[2] - 0.8) / (1.5 - 0.8),  # d_2,
+    ra[2] / (np.pi /4),  # ra_2,
+    (h[2] == 0.3) * 1.0,  # z_2
   ])
-  print(list(inputs))
 
-  # inputs = torch.tensor(inputs, dtype=torch.float32)
-  # v, t = model(inputs).detach().numpy()
-  v, t = optimal_vals[i]
-  print(inputs, v, t)
+  x = list(inputs)
+  inputs = torch.tensor(inputs, dtype=torch.float32)
+  v, t = model(inputs).detach().numpy()
+  if optimal_vals is not None:
+    v, t = optimal_vals[i]
+  v, t = 2 * v, 2 * t
+  print(x, v, t)
   print('-----')
   
   boundary_conditions.append([
@@ -137,9 +133,12 @@ config["quadrotor_config"]["gui"] = True
 config["quadrotor_config"]["gates"] = []
 config["quadrotor_config"]["obstacles"] = []
 
-config["quadrotor_config"]["gates"] = [ # ]
-  [gx, gy, 0, 0, 0, gt, gz] for gx, gy, gz, gt in list(zip(gate_x, gate_y, gate_z, gate_theta))[1:]
-]
+if RENDER_GATES:
+  config["quadrotor_config"]["gates"] = [
+    [gx, gy, 0, 0, 0, gt, gz] for gx, gy, gz, gt in list(zip(gate_x, gate_y, gate_z, gate_theta))[1:]
+  ]
+else:
+  config["quadrotor_config"]["gates"] = []
 
 config["quadrotor_config"]["init_state"]["init_x"] = boundary_conditions[0][1][0]
 config["quadrotor_config"]["init_state"]["init_y"] = boundary_conditions[0][1][1]
@@ -240,6 +239,8 @@ skipped_waypoints = len(waypoints) - len(visited)
 average_error = total_deviation / int(CTRL_FREQ*(ctrl.total_time))
 error_reward = 0 if average_error < 0.25 else -10
 
+if optimal_vals is not None:
+  print("Optimal values were used")
 print("Crash cost: ", cumulative_reward)
 print("Time to complete course: ", ctrl.total_time) 
 print("Skpped waypoints: ", -100*skipped_waypoints)

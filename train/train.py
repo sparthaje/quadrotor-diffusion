@@ -74,7 +74,7 @@ class CustomLoss(torch.nn.Module):
 criterion = CustomLoss()
 criterion_test = CustomLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1) 
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.8) 
 
 batch_size = 1280
 train_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
@@ -85,6 +85,8 @@ loss_list = []
 test_loss_list = []
 num_epochs = 1000
 lowest_test_loss = float('inf')
+counter = 0
+patience = 100
 best_model = None
 
 for epoch in range(num_epochs):
@@ -110,11 +112,18 @@ for epoch in range(num_epochs):
         if avg_test_loss < lowest_test_loss:
             lowest_test_loss = avg_test_loss
             best_model = model.state_dict()
+            counter = 0
+        else:
+            counter += 1
 
     if (epoch + 1) % 10 == 0:
         print(f'Epoch [{epoch + 1}/{num_epochs}], Test Loss: {avg_test_loss:.4f}, Best Test Loss: {lowest_test_loss:.4f}')
-
+        
     test_loss_list.append(avg_test_loss)
+    
+    if counter >= patience:
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Test Loss: {avg_test_loss:.4f}, Best Test Loss: {lowest_test_loss:.4f}')
+        break
 
 if best_model is not None:
     model.load_state_dict(best_model)
