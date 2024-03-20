@@ -6,6 +6,7 @@ class BoundaryPredictor(nn.Module):
     super().__init__()
     self.inp_dim = inp_dim
     self.hidden1 = nn.Linear(inp_dim, 512)
+    self.dropout1 = nn.Dropout(0.1)
     self.activation1 = nn.LeakyReLU(negative_slope=0.1)
     
     self.hidden2 = nn.Linear(512, 256)
@@ -23,7 +24,7 @@ class BoundaryPredictor(nn.Module):
     self.output_activation = nn.ReLU()
 
   def forward(self, x):
-    x = self.activation1(self.hidden1(x))
+    x = self.activation1(self.dropout1(self.hidden1(x)))
     x = self.activation2(self.dropout2(self.hidden2(x)))
     x = self.activation3(self.dropout3(self.hidden3(x)))
     x = self.activation4(self.hidden4(x))
