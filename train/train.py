@@ -10,17 +10,27 @@ import datetime
 
 from model import BoundaryPredictor
 
-# Replace 0.0 for optimal velocity with a small value
-ZERO_EQ = 0.0
-
 # Load the dataset
-dataset = pd.read_csv('data-90k.csv')
+dataset = pd.read_csv('data.csv')
+
+# If best_v is 0, replace it with a small value (OPTIONAL)
+ZERO_EQ = 0.0
 dataset.loc[dataset['best_v'] == 0, 'best_v'] = ZERO_EQ
-# Duplicate rows where dataset['best_v'] == 0
-# zero_rows = dataset[dataset['best_v'] == 0]
-# for i in range(10):
-#   dataset = pd.concat([dataset, zero_rows], ignore_index=True)
-print(sum(dataset['best_v'] == 0))
+
+# Normalize the dataset
+dataset["best_v"] = dataset["best_v"] / 2.0
+dataset["best_t"] = dataset["best_t"] / 2.0
+dataset["v0"] = dataset["v0"] / 2.0
+
+dataset["d1"] = (dataset["d1"] - 0.8) / (1.5 - 0.8)
+dataset["d2"] = (dataset["d2"] - 0.8) / (1.5 - 0.8)
+
+dataset["z0"] = (dataset["z0"] == 0.3) * 1.0
+dataset["z1"] = (dataset["z1"] == 0.3) * 1.0
+dataset["z2"] = (dataset["z2"] == 0.3) * 1.0
+
+dataset["theta1"] = dataset["theta1"] / (np.pi / 4)
+dataset["theta2"] = dataset["theta2"] / (np.pi / 4)
 
 X = dataset.iloc[:, 0:8].values
 y = dataset.iloc[:, 8:].values
@@ -29,7 +39,7 @@ y = dataset.iloc[:, 8:].values
 X = torch.tensor(X, dtype=torch.float32)
 y = torch.tensor(y, dtype=torch.float32)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=19)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.08, random_state=19)
 
 print(f'X_train shape: {X_train.shape}')
 print(f'X_test shape: {X_test.shape}')
@@ -37,10 +47,13 @@ print(f'X_test shape: {X_test.shape}')
 # Define the model
 input_size = X.shape[1]
 output_size = y.shape[1]
-print(input_size, output_size)
+print("Input and output dimensions", input_size, output_size)
 model = BoundaryPredictor(input_size)
-
+print()
 print(model)
+num_params = sum(p.numel() for p in model.parameters())
+print(f"Number of parameters in the model: {num_params}")
+print()
 
 # Define the loss function and optimizer
 class CustomLoss(torch.nn.Module):
@@ -48,14 +61,24 @@ class CustomLoss(torch.nn.Module):
     super(CustomLoss, self).__init__()
 
   def forward(self, outputs, targets):
-    # Custom loss calculation
-    loss = torch.mean((outputs - targets) ** 2)
+    # loss = torch.mean((outputs - targets) ** 2)
+    epsilon = 0.1
+    percent_errors = (outputs - targets) / (targets + epsilon)
+    percent_errors[:, 1] = -percent_errors[:, 1]  # this way -time indicates slower
+    loss = torch.mean(torch.where(percent_errors >= 0, 
+                                       5 * percent_errors,  # worse to go fast
+                                       -0.8 * percent_errors)) # better to go slow
     return loss
 
 # Create an instance of the custom loss function
 criterion = CustomLoss()
 criterion_test = CustomLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.1) 
+
+batch_size = 1280
+train_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
+test_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
 
 # Train the model
 loss_list = []
@@ -65,25 +88,33 @@ lowest_test_loss = float('inf')
 best_model = None
 
 for epoch in range(num_epochs):
-  # Forward pass
-  outputs = model(X_train)
-  loss = criterion(outputs, y_train)
+    model.train()  # Set model to training mode
+    for batch_X, batch_y in train_loader:
+        optimizer.zero_grad()
+        outputs = model(batch_X)
+        loss = criterion(outputs, batch_y)
+        loss.backward()
+        optimizer.step()
 
-  # Backward and optimize
-  optimizer.zero_grad()
-  loss.backward()
-  optimizer.step()
+    scheduler.step()  # Update learning rate scheduler
 
-  test_loss = criterion_test(model(X_test), y_test)
-  if test_loss < lowest_test_loss:
-        lowest_test_loss = test_loss
-        best_model = model.state_dict()
+    model.eval()  # Set model to evaluation mode
+    with torch.no_grad():
+        total_loss = 0
+        for batch_X_test, batch_y_test in test_loader:
+            test_outputs = model(batch_X_test)
+            test_loss = criterion(test_outputs, batch_y_test)
+            total_loss += test_loss.item() * len(batch_X_test)
+        avg_test_loss = total_loss / len(X_test)
+        
+        if avg_test_loss < lowest_test_loss:
+            lowest_test_loss = avg_test_loss
+            best_model = model.state_dict()
 
-  if (epoch+1) % 10 == 0:
-    print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Test Loss: {test_loss.item():.4f}, Best Test Loss: {lowest_test_loss.item():.4f}')
+    if (epoch + 1) % 10 == 0:
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Test Loss: {avg_test_loss:.4f}, Best Test Loss: {lowest_test_loss:.4f}')
 
-  loss_list.append(loss.item())
-  test_loss_list.append(test_loss.item())
+    test_loss_list.append(avg_test_loss)
 
 if best_model is not None:
     model.load_state_dict(best_model)
@@ -149,130 +180,3 @@ plt.title('Loss and Test Loss vs Epoch')
 plt.legend()
 plt.savefig('loss.png')
 plt.close()
-
-# dataset = pd.read_csv('data-90k.csv')
-# dataset.loc[dataset['best_v'] == 0, 'best_v'] = ZERO_EQ
-
-# X = dataset.iloc[:, 0:input_size].values
-# y = dataset.iloc[:, input_size:].values
-
-# # # Convert the data to tensors
-# X = torch.tensor(X, dtype=torch.float32)
-# y = torch.tensor(y, dtype=torch.float32)
-# err = []
-# a, b = 0, 0
-# for x, y in zip(X, y):
-#   pred = model(x).detach().numpy()
-#   y = y.detach().numpy()
-#   if np.isclose(y[0], ZERO_EQ, atol=1e-3):
-#     a += pred[0]
-#     b += 1
-#     continue
-  
-#   err.append(np.array([
-#     (pred[0] - y[0]) / y[0] * 100,
-#     (pred[1] - y[1]) / y[1] * 100
-#   ]))
-
-# err_0 = [item[0] for item in err]
-# err_1 = [item[1] for item in err]
-# if b != 0:
-#   print(f"average velocity predicted when it should be {ZERO_EQ} in full dataset: {a/b}, examples {b}")
-
-# # Plot Velocity Prediction % Error and Time Prediction % Error in the same figure
-# plt.figure(figsize=(10, 5))
-
-# # Plot Velocity Prediction % Error
-# plt.subplot(1, 2, 1)
-# plt.hist(err_0, bins=20, color='blue', alpha=0.7, label='Velocity Prediction')
-# plt.xlabel('Velocity Prediction % Error')
-# plt.ylabel('Frequency')
-# plt.yscale('log')  # Set y-axis to log scale
-
-# # Plot Time Prediction % Error
-# plt.subplot(1, 2, 2)
-# plt.hist(err_1, bins=20, color='green', alpha=0.7, label='Time Prediction')
-# plt.xlabel('Time Prediction % Error')
-# plt.ylabel('Frequency')
-# plt.yscale('log')  # Set y-axis to log scale
-
-# plt.suptitle('Histogram of Velocity and Time Prediction Errors')
-# plt.legend()
-# plt.savefig('fulldataset_histogram.png')
-# plt.close()
-
-# Create a 3D histogram of all the errors
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
-
-# Set the number of bins for err_0 and err_1
-bins = 20
-
-# Compute the histogram
-hist, xedges, yedges = np.histogram2d(err_0, err_1, bins=bins)
-
-# Convert the histogram to log scale
-hist = np.log(hist)
-
-# Create the x and y meshgrid
-xpos, ypos = np.meshgrid(xedges[:-1], yedges[:-1])
-
-# Flatten the histogram and convert to 1D array
-zpos = 0
-dx = dy = 0.1
-dz = hist.flatten()
-
-# Create the 3D bar plot
-ax.bar3d(xpos.flatten(), ypos.flatten(), zpos, dx, dy, dz, zsort='average')
-
-# Set the labels and title
-ax.set_xlabel('Velocity Prediction % Error')
-ax.set_ylabel('Time Prediction % Error')
-ax.set_zlabel('Log Frequency')
-ax.set_title('3D Histogram of Velocity and Time Prediction Errors')
-plt.savefig('3d_histogram.png')
-plt.close()
-
-# look at the errors within 100%
-err_0 = [item[0] for item in err if abs(item[0]) < 100]
-err_1 = [item[1] for item in err if abs(item[0]) < 100]
-# Plot Velocity Prediction % Error and Time Prediction % Error in the same figure
-plt.figure(figsize=(10, 5))
-
-# Plot Velocity Prediction % Error
-plt.subplot(1, 2, 1)
-plt.hist(err_0, bins=20, color='blue', alpha=0.7, label='Velocity Prediction')
-plt.xlabel('Velocity Prediction % Error')
-plt.ylabel('Frequency')
-plt.yscale('log')  # Set y-axis to log scale
-
-# Plot Time Prediction % Error
-plt.subplot(1, 2, 2)
-plt.hist(err_1, bins=20, color='green', alpha=0.7, label='Time Prediction')
-plt.xlabel('Time Prediction % Error')
-plt.ylabel('Frequency')
-plt.yscale('log')  # Set y-axis to log scale
-
-plt.suptitle('Histogram of Velocity and Time Prediction Errors')
-plt.legend()
-plt.savefig('testdataset_histogram_within100.png')
-plt.close()
-
-plt.figure(figsize=(10, 5))
-# Plot Velocity Prediction % Error
-plt.subplot(1, 2, 1)
-plt.hist(err_0, bins=20, color='blue', alpha=0.7, label='Velocity Prediction')
-plt.xlabel('Velocity Prediction % Error')
-plt.ylabel('Frequency')
-
-# Plot Time Prediction % Error
-plt.subplot(1, 2, 2)
-plt.hist(err_1, bins=20, color='green', alpha=0.7, label='Time Prediction')
-plt.xlabel('Time Prediction % Error')
-plt.ylabel('Frequency')
-
-plt.suptitle('Histogram of Velocity and Time Prediction Errors')
-plt.legend()
-plt.savefig('testdataset_histogram_within100-no-log.png')
-plt.close()
-
