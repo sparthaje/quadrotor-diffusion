@@ -109,6 +109,13 @@ class Controller():
                 self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
                 self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
                 self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
+                
+            # print("Max vels:", max(self.ref_vel[0]), max(self.ref_vel[1]), max(self.ref_vel[2]))
+            # print("Min vels:", min(self.ref_vel[0]), min(self.ref_vel[1]), min(self.ref_vel[2]))
+
+            # print("Max accels:", max(self.ref_acc[0]), max(self.ref_acc[1]), max(self.ref_acc[2]))
+            # print("Min accels:", min(self.ref_acc[0]), min(self.ref_acc[1]), min(self.ref_acc[2]))
+            # print("--------")
             
             total_steps = int(b_f[0] * self.CTRL_FREQ)
             self.ref_yaw = np.append(self.ref_yaw, np.linspace(b_0[5], b_f[5], int(total_steps * REF_YAW_RATIO)))
@@ -141,7 +148,7 @@ class Controller():
             
         return self.total_time, waypoints, coeffs, Ts, Yaws
     
-    def build_traj(self, test_case, v, t, gui=False):
+    def build_traj(self, test_case, v, t, gui=False, print_accel_limits=False):
         heights = [test_case.z, test_case.g1z, test_case.g2z]
         waypoints = [np.array([x[0], x[1], z]) for x, z in zip(self.NOMINAL_GATES, heights)]
         boundaries = []
@@ -205,6 +212,14 @@ class Controller():
             self.ref_yaw = np.append(self.ref_yaw, np.linspace(b_0[5], b_f[5], int(total_steps * REF_YAW_RATIO)))
             self.ref_yaw = np.append(self.ref_yaw, np.full(total_steps - int(total_steps * REF_YAW_RATIO), b_f[5]))
             self.T.append(b_f[0])
+            
+        if print_accel_limits:
+            print("--------------------")
+            for b in boundaries:
+                for x in b:
+                    print(x)
+                print("--------------------")
+            print()
 
         for xyz in range(3):
             assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz]) and len(self.ref_acc[xyz]) == len(self.ref_yaw)

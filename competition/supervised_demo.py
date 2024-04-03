@@ -56,7 +56,8 @@ heights = [(heights[i], heights[i+1], heights[i+2]) for i in range(len(gate_x))]
 
 # assert that all the lists have the same length
 assert len(gate_x) == len(gate_y) == len(gate_z) == len(gate_theta) == len(d_vals) == len(rel_angles) == len(heights), "All lists must have the same length"
-optimal_vals = None
+optimal_vals = [(1.1111111111111112, 1.008), (0.8888888888888888, 0.8700000000000001), (1.1111111111111112, 0.8500000000000001), (0.8888888888888888, 0.81), (1.7777777777777777, 0.675)]
+optimal_vals = [(1.3333333333333333, 0.9600000000000002), (0.8888888888888888, 0.7046999999999999), (1.1111111111111112, 0.6799999999999999), (1.1111111111111112, 0.729), (1.7777777777777777, 0.6230769230769231)]
 model = BoundaryPredictor(8)
 model.eval()
 print(newest_file_in_directory("../models"))

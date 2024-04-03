@@ -16,6 +16,8 @@ except ImportError:
     # Test import.
     from .competition_utils import Command, thrusts
     from .data_collection_ctrls import Controller, yaw_rot, INITIAL_GATE_EXIT, States
+    
+from data_gen_costs import *
 
 
 MIN_VELOCITY = 0.0
@@ -173,7 +175,7 @@ def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
   ctrl = Controller(vicon_obs, info, config.use_firmware, verbose=config.verbose)
   
   # build trajectory such that the quadrotor will stop at the third gate
-  total_time, waypoints = ctrl.build_traj(test_case, bv, bt, gui)
+  total_time, waypoints = ctrl.build_traj(test_case, bv, bt, gui, print_accel_limits=print_accel_limits)
   if print_accel_limits:
     print(f"Acceleration limits: ({min(ctrl.ref_acc[0])}, {max(ctrl.ref_acc[0])}), ({min(ctrl.ref_acc[1])}, {max(ctrl.ref_acc[1])}), ({min(ctrl.ref_acc[2])}, {max(ctrl.ref_acc[2])})")
     print(f"Velocity limits: ({min(ctrl.ref_vel[0])}, {max(ctrl.ref_vel[0])}), ({min(ctrl.ref_vel[1])}, {max(ctrl.ref_vel[1])}), ({min(ctrl.ref_vel[2])}, {max(ctrl.ref_vel[2])})")
@@ -197,15 +199,24 @@ def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
   total_deviation = 0
   total_dist = 0
   
-  if np.max(ctrl.ref_acc) > 5:
-    return -10000 * 5
-
-  if np.min(ctrl.ref_acc) < -5:
-    return -10000 * 5
-  
-  if np.max(ctrl.ref_vel) > 2:
-    return -10000 * 5
-  
+  if ACCEL_VECTOR:
+    for a1, a2, a3, v1, v2, v3 in zip(ctrl.ref_acc[0], ctrl.ref_acc[1], ctrl.ref_acc[2], ctrl.ref_vel[0], ctrl.ref_vel[1], ctrl.ref_vel[2]):
+      a = np.linalg.norm(np.array([a1, a2, a3]))
+      v = np.linalg.norm(np.array([v1, v2, v3]))
+      if v > VEL_LIMIT_COST:
+        return -VEL_COST
+      
+      if abs(a) > PARABOLA_SHAPE * (v**2) + PARABOLA_INTERCEPT:
+        return -ACCEL_COST
+  else:  
+    for xyz in range(3):
+      for a, v in zip(ctrl.ref_acc[xyz], ctrl.ref_vel[xyz]):
+        if v > VEL_LIMIT_COST:
+          return -VEL_COST
+        
+        if abs(a) > PARABOLA_SHAPE * (v**2) + PARABOLA_INTERCEPT:
+          return -ACCEL_COST
+    
   for i in range(int(CTRL_FREQ*(ctrl.total_time))):
       curr_time = i * CTRL_DT
       vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
@@ -268,7 +279,9 @@ def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
   ## average_error: average deviation from trajectory
   ## bt: time taken to complete trajectory
 
-  return 10000 * cumulative_reward - 100*skipped_waypoints - 4 * average_error - 1 * bt
+  return -CRASH_COST * abs(cumulative_reward) - \
+          SKIPPED_WAYPOINT_COST*skipped_waypoints - \
+            TRACKING_COST * average_error - TIME_COST * bt
 
 def get_optimal_vals(test_case):
   """
@@ -390,7 +403,7 @@ if "testing" in ''.join(argv):
     g2z: Any
   """
   inps = [
-    [vals[3][0], 1.3333333333333333, vals[5][1], vals[6][1], vals[3][1], vals[5][2], vals[6][2], vals[3][2]] for vals in zip(gate_x, gate_y, gate_z, heights, gate_theta, d_vals, rel_angles)
+    [vals[3][0], 0.0, vals[5][1], vals[6][1], vals[3][1], vals[5][2], vals[6][2], vals[3][2]] for vals in zip(gate_x, gate_y, gate_z, heights, gate_theta, d_vals, rel_angles)
   ]
   
   outputs = []
@@ -407,6 +420,7 @@ if "testing" in ''.join(argv):
     inps[i + 1][1] = v
     i += 1
   
+  print("---------" * 4)
   for i, o in zip(inps, outputs):
     print(i, o)
     run_env(get_tc(i), o[0], o[1], False, print_accel_limits=True)
