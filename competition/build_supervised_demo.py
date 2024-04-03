@@ -67,6 +67,12 @@ def main():
         print("d_vals =", distances)
         print("rel_angles =", relative_angles)
         print("--------------------")
+        print()
+        print("------ OFFSETS ------")
+        print(f"#define X_OFFSET {argv[1]}")
+        print(f"#define Y_OFFSET {argv[2]}")
+        print("--------------------")
+        
         break
     
     distances.append(float(d_input))

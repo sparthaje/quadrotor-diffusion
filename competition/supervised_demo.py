@@ -6,6 +6,7 @@ import numpy as np
 from time import sleep
 import torch
 from train.model import BoundaryPredictor
+from sys import argv
 
 from safe_control_gym.utils.configuration import ConfigFactory
 from safe_control_gym.utils.registration import make
@@ -32,17 +33,18 @@ def newest_file_in_directory(directory):
 
     return newest_file[0]  # Return the path of the newest file
 
-RENDER_GATES = False
+RENDER_GATES = "gates" in argv
+GENERATE_CSV = "gen_csv" in argv
 
 # Copied from `build_supervised_demo.py`
 # NOTE(shreepa): MAKE SURE THAT THE FIRST GATE IS TAKEOFF POSITION AND LAST TWO GATES ARE DUMMY GATES WHEN RUNNING BUILD DEMO
-gate_x = [-1.0, -1.0, -0.3891503010995544, 0.662417714953082, 1.86182558739196, 2.875019097994378, 3.3290095977339242, 3.7830000974734705]
-gate_y = [-1.75, -0.55, 0.4828904324047323, 1.0609948413267904, 1.0233019304330362, 0.38030977645823993, -0.5106967477301281, -1.401703271918496]
-gate_z = [0, 0, 0, 0, 0, 0, 0, 0]
-heights = [0.525, 0.525, 0.525, 0.525, 0.525, 0.525, 0.525, 0.525]
-gate_theta = [0.0, -0.5340707511102648, -1.0681415022205298, -1.6022122533307948, -2.1362830044410597, -2.6703537555513246, -2.6703537555513246, -2.6703537555513246]
-d_vals = [0, 1.2, 1.2, 1.2, 1.2, 1.2, 1.0, 1.0]
-rel_angles = [0.0, -0.5340707511102649, -0.5340707511102649, -0.5340707511102649, -0.5340707511102649, -0.5340707511102649, 0.0, 0.0]
+gate_x = [-1.0, -1.0, -0.42465867716842287, 0.4186388189488832, 1.0747105836281534, 1.2620918982138778, 1.4494732127996022]
+gate_y = [-1.5, -0.7, -0.04740336942150014, 0.05912987910815866, 0.6752222744439786, 1.6575095251726673, 2.639796775901356]
+gate_z = [1, 1, 0, 0, 0, 0, 0]
+heights = [0.3, 0.3, 0.525, 0.525, 0.525, 0.525, 0.525]
+gate_theta = [0.0, -0.7225663103256523, -1.4451326206513047, -0.816814089933346, -0.1884955592153874, -0.1884955592153874, -0.1884955592153874]
+d_vals = [0, 0.8, 0.87, 0.85, 0.9, 1.0, 1.0]
+rel_angles = [0.0, -0.7225663103256524, -0.7225663103256524, 0.6283185307179586, 0.6283185307179586, 0.0, 0.0]
 
 gate_x = gate_x[:-2]
 gate_y = gate_y[:-2]
@@ -93,17 +95,18 @@ for gx, gy, gz, h, gt, d, ra in list(zip(gate_x, gate_y, gate_z, heights, gate_t
   v, t = model(inputs).detach().numpy()
   if optimal_vals is not None:
     v, t = optimal_vals[i]
-  v, t = 2 * v, 2 * t
+  v, t = v, t
   print(x, v, t)
   print('-----')
   
+  theta = np.arctan2(np.sin(ra[1] + gt), np.cos(ra[1] + gt))
   boundary_conditions.append([
     t,
     np.array([gate_x[i+1], gate_y[i+1], heights[i+1][0]]),
-    yaw_rot(gt) @ (v * INITIAL_GATE_EXIT),
+    yaw_rot(theta) @ (v * INITIAL_GATE_EXIT),
     np.zeros(3),
     np.zeros(3),
-    np.arctan2(np.sin(ra[1] + gt), np.cos(ra[1] + gt)),
+    theta,
   ])
   i += 1
   
@@ -129,7 +132,7 @@ for b in boundary_conditions:
 
 CONFIG_FACTORY = ConfigFactory()
 config = CONFIG_FACTORY.merge()
-config["quadrotor_config"]["gui"] = True
+config["quadrotor_config"]["gui"] = not GENERATE_CSV
 config["quadrotor_config"]["gates"] = []
 config["quadrotor_config"]["obstacles"] = []
 
@@ -171,7 +174,27 @@ env = firmware_wrapper.env
 
 vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
 ctrl = Controller(vicon_obs, info, config.use_firmware, verbose=config.verbose)
-total_time, waypoints = ctrl.build_traj_with_boundaries(boundary_conditions)
+total_time, waypoints, coeffs, Ts, Yaws = ctrl.build_traj_with_boundaries(boundary_conditions)
+
+if GENERATE_CSV:
+  filename = input("csv name? ")
+  f = open("../sim-data/" + filename, "w")
+  f.write("t,x,y,z\n")
+  ctrl.file = f
+
+## Print stuff for IRL testing
+print("---------")
+print("coeff_x =", coeffs[0])
+print()
+print("coeff_y =", coeffs[1])
+print()
+print("coeff_z =", coeffs[2])
+print()
+print("Ts =", Ts)
+print()
+print("Yaws =", Yaws)
+print("---------")
+
 visited = set()
 bases = []
 
@@ -193,7 +216,7 @@ total_dist = 0
 for i in range(int(CTRL_FREQ*(ctrl.total_time + 2))):
     curr_time = i * CTRL_DT
     vicon_obs = [obs[0], 0, obs[2], 0, obs[4], 0, obs[6], obs[7], obs[8], 0, 0, 0]
-    command_type, args = ctrl.cmdFirmware(curr_time)
+    command_type, args = ctrl.cmdFirmware(curr_time, obs=vicon_obs)
 
     if command_type == Command.FULLSTATE:
         firmware_wrapper.sendFullStateCmd(*args, curr_time)
@@ -246,3 +269,6 @@ print("Time to complete course: ", ctrl.total_time)
 print("Skpped waypoints: ", -100*skipped_waypoints)
 print("Cost from tracking error: ", average_error)
 print("--------------------")
+
+if GENERATE_CSV:
+  ctrl.file.close()

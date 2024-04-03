@@ -116,7 +116,7 @@ class TestCase:
     # returns all fields in class as a comma separated string ordered by the get_header output
     return f"{self.v},{self.z},{self.dist},{self.theta_rel[1]},{self.g1z},{self.end_dist},{self.theta_rel[2]},{self.g2z},{self.optimal_velocity},{self.optimal_time}"
 
-def run_env(test_case, bv, bt, gui=False):
+def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
   # bv: velocity to test at gate 1
   # bt: time to test at gate 1
   
@@ -174,6 +174,9 @@ def run_env(test_case, bv, bt, gui=False):
   
   # build trajectory such that the quadrotor will stop at the third gate
   total_time, waypoints = ctrl.build_traj(test_case, bv, bt, gui)
+  if print_accel_limits:
+    print(f"Acceleration limits: ({min(ctrl.ref_acc[0])}, {max(ctrl.ref_acc[0])}), ({min(ctrl.ref_acc[1])}, {max(ctrl.ref_acc[1])}), ({min(ctrl.ref_acc[2])}, {max(ctrl.ref_acc[2])})")
+    print(f"Velocity limits: ({min(ctrl.ref_vel[0])}, {max(ctrl.ref_vel[0])}), ({min(ctrl.ref_vel[1])}, {max(ctrl.ref_vel[1])}), ({min(ctrl.ref_vel[2])}, {max(ctrl.ref_vel[2])})")
   visited = set()
   
   # transformation to get the position relative to each gate
@@ -193,6 +196,15 @@ def run_env(test_case, bv, bt, gui=False):
   prev_args = None
   total_deviation = 0
   total_dist = 0
+  
+  if np.max(ctrl.ref_acc) > 5:
+    return -10000 * 5
+
+  if np.min(ctrl.ref_acc) < -5:
+    return -10000 * 5
+  
+  if np.max(ctrl.ref_vel) > 2:
+    return -10000 * 5
   
   for i in range(int(CTRL_FREQ*(ctrl.total_time))):
       curr_time = i * CTRL_DT
@@ -349,24 +361,40 @@ def main():
 # if testing is included as an arg then run these tests instead of generating all test data
 if "testing" in ''.join(argv):
   
-  # circular course
+  # Copied from `build_supervised_demo.py`
+  # NOTE(shreepa): MAKE SURE THAT THE FIRST GATE IS TAKEOFF POSITION AND LAST TWO GATES ARE DUMMY GATES WHEN RUNNING BUILD DEMO
+  gate_x = [-1.0, -1.0, -0.42465867716842287, 0.4186388189488832, 1.0747105836281534, 1.2620918982138778, 1.4494732127996022]
+  gate_y = [-1.5, -0.7, -0.04740336942150014, 0.05912987910815866, 0.6752222744439786, 1.6575095251726673, 2.639796775901356]
+  gate_z = [1, 1, 0, 0, 0, 0, 0]
+  heights = [0.3, 0.3, 0.525, 0.525, 0.525, 0.525, 0.525]
+  gate_theta = [0.0, -0.7225663103256523, -1.4451326206513047, -0.816814089933346, -0.1884955592153874, -0.1884955592153874, -0.1884955592153874]
+  d_vals = [0, 0.8, 0.87, 0.85, 0.9, 1.0, 1.0]
+  rel_angles = [0.0, -0.7225663103256524, -0.7225663103256524, 0.6283185307179586, 0.6283185307179586, 0.0, 0.0]
+  
+  gate_x = gate_x[:-2]
+  gate_y = gate_y[:-2]
+  gate_z = gate_z[:-2]
+  gate_theta = gate_theta[:-2]
+  d_vals = [(d_vals[i], d_vals[i+1], d_vals[i+2]) for i in range(len(gate_x))]
+  rel_angles = [(rel_angles[i], rel_angles[i+1], rel_angles[i+2]) for i in range(len(gate_x))]
+  heights = [(heights[i], heights[i+1], heights[i+2]) for i in range(len(gate_x))]
+
+  """ 
+    z: Any,
+    v: Any,
+    dist: Any,
+    g_theta: Any,
+    g1z: Any,
+    end_dist: Any,
+    end_theta: Any,
+    g2z: Any
+  """
   inps = [
-    [0.0, 0.525, 0.8, 0.0, 0.525, 0.8, 0.6283185307179586, 0.525],
-    [1.3512271642684937, 0.525, 0.8, 0.6283185307179586, 0.525, 1.0, -0.3141592653589793, 0.525],
-    [0.7718974351882935, 0.525, 1.0, -0.3141592653589793, 0.525, 0.8, 0.0, 0.525],
-    [1.0465269088745117, 0.525, 0.8, 0.0, 0.525, 1.5, -0.7225663103256524, 0.525],
-    [1.2947043180465698, 0.525, 1.5, -0.7225663103256524, 0.525, 1.0, 0.0, 0.525],
+    [vals[3][0], 1.3333333333333333, vals[5][1], vals[6][1], vals[3][1], vals[5][2], vals[6][2], vals[3][2]] for vals in zip(gate_x, gate_y, gate_z, heights, gate_theta, d_vals, rel_angles)
   ]
   
-  # straight line course
-  # inps = [
-  #   [0.0, 0.0, 0.525, 0.8, 0.0, 0.525, 0.8, 0.0, 0.525],
-  #   [1.7777777777777777, 0.0, 0.525, 0.8, 0.0, 0.525, 0.8, 0.0, 0.525],
-  #   [0.4444444444444444, 0.0, 0.525, 0.8, 0.0, 0.525, 0.8, 0.0, 0.525]
-  # ]
-  
   outputs = []
-  get_tc = lambda inp: TestCase(inp[1], inp[0], inp[2], inp[3], inp[4], inp[5], inp[6], inp[7])
+  get_tc = lambda inp: TestCase(inp[0], inp[1], inp[2], inp[3], inp[4], inp[5], inp[6], inp[7])
   
   i = 0
   for inp in inps:    
@@ -375,12 +403,16 @@ if "testing" in ''.join(argv):
     
     if i == len(inps) - 1:
       continue
-    inps[i + 1][0] = v
+    
+    inps[i + 1][1] = v
     i += 1
   
-  print(inps)
-  print(outputs)
+  for i, o in zip(inps, outputs):
+    print(i, o)
+    run_env(get_tc(i), o[0], o[1], False, print_accel_limits=True)
+    print("---------" * 4)
   print("Total course time: ", sum([x[1] for x in outputs]))
+  print("optimal_vals =", outputs)
       
 elif __name__ == "__main__":
   main()

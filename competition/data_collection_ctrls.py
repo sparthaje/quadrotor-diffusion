@@ -92,13 +92,18 @@ class Controller():
         self.ref_acc = [[], [], []]
         self.ref_yaw = []
         self.T = []
+        
+        coeffs = [[], [], []]
+        Ts = []
+        Yaws = []
 
         for index in range(len(boundaries) - 1):
             b_0 = boundaries[index]
             b_f = boundaries[index + 1]
             for xyz in range(3):
                 sigma = np.array([b_0[1][xyz], b_f[1][xyz], b_0[2][xyz], b_f[2][xyz], b_0[3][xyz], b_f[3][xyz], b_0[4][xyz], b_f[4][xyz]])
-                coeff = calc_traj(sigma, b_f[0])
+                coeff = calc_traj(sigma, b_f[0])  
+                coeffs[xyz].append(list(coeff))
 
                 t = np.linspace(0, b_f[0], int(b_f[0] * self.CTRL_FREQ))
                 self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
@@ -109,6 +114,11 @@ class Controller():
             self.ref_yaw = np.append(self.ref_yaw, np.linspace(b_0[5], b_f[5], int(total_steps * REF_YAW_RATIO)))
             self.ref_yaw = np.append(self.ref_yaw, np.full(total_steps - int(total_steps * REF_YAW_RATIO), b_f[5]))
             self.T.append(b_f[0])
+            Ts.append(b_f[0])
+            # in vicon 0 degrees is along the x-axis, so im just gonna rotate everything
+            target_yaw_vicon_map = b_f[5] + np.pi / 4
+            target_yaw_vicon_map = np.arctan2(np.sin(target_yaw_vicon_map), np.cos(target_yaw_vicon_map))
+            Yaws.append(target_yaw_vicon_map)
 
         for xyz in range(3):
             assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz]) and len(self.ref_acc[xyz]) == len(self.ref_yaw)
@@ -117,13 +127,19 @@ class Controller():
         assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
         assert len(self.ref_acc[0]) == len(self.ref_acc[1]) and len(self.ref_acc[1]) == len(self.ref_acc[2])
 
+        print("Max vels:", max(self.ref_vel[0]), max(self.ref_vel[1]), max(self.ref_vel[2]))
+        print("Min vels:", min(self.ref_vel[0]), min(self.ref_vel[1]), min(self.ref_vel[2]))
+
+        print("Max accels:", max(self.ref_acc[0]), max(self.ref_acc[1]), max(self.ref_acc[2]))
+        print("Min accels:", min(self.ref_acc[0]), min(self.ref_acc[1]), min(self.ref_acc[2]))
+
         self.total_time = sum(self.T)
 
         if gui:
             # Draw the trajectory on PyBullet's GUI.
             draw_trajectory(self.initial_info, waypoints, self.ref_pos[0], self.ref_pos[1], self.ref_pos[2])
             
-        return self.total_time, waypoints
+        return self.total_time, waypoints, coeffs, Ts, Yaws
     
     def build_traj(self, test_case, v, t, gui=False):
         heights = [test_case.z, test_case.g1z, test_case.g2z]
@@ -241,6 +257,7 @@ class Controller():
         self.VERBOSE = verbose
         self.BUFFER_SIZE = buffer_size
         self.initial_info = initial_info
+        self.file = None
 
         # Store a priori scenario information.
         self.NOMINAL_GATES = initial_info["nominal_gates_pos_and_type"]
@@ -269,7 +286,7 @@ class Controller():
         # REPLACE THIS (END) ####
         #########################
 
-    def cmdFirmware(self, time):
+    def cmdFirmware(self, time, obs=[0 for _ in range(10)]):
         """
         Pick command sent to the quadrotor through a Crazyswarm/Crazyradio-like interface.
         """
@@ -286,6 +303,9 @@ class Controller():
             # target_yaw = np.arctan2(np.sin(target_yaw), np.cos(target_yaw))
             target_yaw = self.ref_yaw[step]
             target_rpy_rates = np.zeros(3)
+            
+            if self.file:
+                self.file.write(f"{time},{obs[0]},{obs[2]},{obs[4]}\n")
 
             command_type = Command(1)  # cmdFullState.
             args = [target_pos, target_vel, target_acc, target_yaw, target_rpy_rates]
