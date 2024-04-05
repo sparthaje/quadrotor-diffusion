@@ -273,6 +273,7 @@ class Controller():
         self.BUFFER_SIZE = buffer_size
         self.initial_info = initial_info
         self.file = None
+        self.cmd_file = None
 
         # Store a priori scenario information.
         self.NOMINAL_GATES = initial_info["nominal_gates_pos_and_type"]
@@ -321,6 +322,9 @@ class Controller():
             
             if self.file:
                 self.file.write(f"{time},{obs[0]},{obs[2]},{obs[4]}\n")
+                
+            if self.cmd_file:
+                self.cmd_file.write(f"{time},{target_pos[0]},{target_pos[1]},{target_pos[2]}\n")
 
             command_type = Command(1)  # cmdFullState.
             args = [target_pos, target_vel, target_acc, target_yaw, target_rpy_rates]

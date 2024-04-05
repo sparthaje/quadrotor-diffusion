@@ -278,10 +278,14 @@ def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
   ## skipped_waypoints: number of waypoints not visited
   ## average_error: average deviation from trajectory
   ## bt: time taken to complete trajectory
+  ## accel_range: range of acceleration normalized by max absolute acceleration
+  
+  accel_range = (np.max(ctrl.ref_acc) - np.min(ctrl.ref_acc)) / np.max(np.abs(ctrl.ref_acc))
 
   return -CRASH_COST * abs(cumulative_reward) - \
           SKIPPED_WAYPOINT_COST*skipped_waypoints - \
-            TRACKING_COST * average_error - TIME_COST * bt
+            TRACKING_COST * average_error - TIME_COST * bt - \
+              ACCEL_RANGE_COST * accel_range
 
 def get_optimal_vals(test_case):
   """

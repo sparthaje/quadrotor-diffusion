@@ -56,8 +56,8 @@ heights = [(heights[i], heights[i+1], heights[i+2]) for i in range(len(gate_x))]
 
 # assert that all the lists have the same length
 assert len(gate_x) == len(gate_y) == len(gate_z) == len(gate_theta) == len(d_vals) == len(rel_angles) == len(heights), "All lists must have the same length"
-optimal_vals = [(1.1111111111111112, 1.008), (0.8888888888888888, 0.8700000000000001), (1.1111111111111112, 0.8500000000000001), (0.8888888888888888, 0.81), (1.7777777777777777, 0.675)]
-optimal_vals = [(1.3333333333333333, 0.9600000000000002), (0.8888888888888888, 0.7046999999999999), (1.1111111111111112, 0.6799999999999999), (1.1111111111111112, 0.729), (1.7777777777777777, 0.6230769230769231)]
+optimal_vals = None
+
 model = BoundaryPredictor(8)
 model.eval()
 print(newest_file_in_directory("../models"))
@@ -179,9 +179,18 @@ total_time, waypoints, coeffs, Ts, Yaws = ctrl.build_traj_with_boundaries(bounda
 
 if GENERATE_CSV:
   filename = input("csv name? ")
-  f = open("../sim-data/" + filename, "w")
+  f = open("../sim-data/" + filename + ".csv", "w")
+  f2 = open("../sim-data/" + filename + "_cmds.csv", "w")
+  f3 = open("../sim-data/" + filename + "_gates.csv", "w")
   f.write("t,x,y,z\n")
+  f2.write("t,x,y,z\n")
+  import pandas as pd
+  df = pd.DataFrame()
+  df["gate_x"] = gate_x
+  df["gate_y"] = gate_y
+  df.to_csv(f3, index=False)
   ctrl.file = f
+  ctrl.cmd_file = f2
 
 ## Print stuff for IRL testing
 print("---------")
@@ -273,3 +282,4 @@ print("--------------------")
 
 if GENERATE_CSV:
   ctrl.file.close()
+  ctrl.cmd_file.close()
