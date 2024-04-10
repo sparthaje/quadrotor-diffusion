@@ -7,6 +7,7 @@ from time import sleep
 import torch
 from train.model import BoundaryPredictor
 from sys import argv
+import pandas as pd
 
 from safe_control_gym.utils.configuration import ConfigFactory
 from safe_control_gym.utils.registration import make
@@ -184,7 +185,6 @@ if GENERATE_CSV:
   f3 = open("../sim-data/" + filename + "_gates.csv", "w")
   f.write("t,x,y,z\n")
   f2.write("t,x,y,z\n")
-  import pandas as pd
   df = pd.DataFrame()
   df["gate_x"] = gate_x
   df["gate_y"] = gate_y

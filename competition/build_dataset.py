@@ -18,7 +18,7 @@ except ImportError:
     from .data_collection_ctrls import Controller, yaw_rot, INITIAL_GATE_EXIT, States
     
 from data_gen_costs import *
-
+from test_case import TestCase
 
 MIN_VELOCITY = 0.0
 MAX_VELOCITY = 2.0
@@ -36,7 +36,7 @@ D_GATE_THETA = 15
 # Secondary Gate
 MIN_END_DISTANCE = 0.8
 MAX_END_DISTANCE = 1.50
-D_END = 3
+D_END = 6
 
 MIN_END_THETA = -np.pi / 4
 MAX_END_THETA = np.pi / 4
@@ -45,7 +45,7 @@ D_END_THETA = 3
 TEST_CASES = 2 * DV * \
              2 * D_D * D_GATE_THETA * \
              2 * D_END * D_END_THETA
-# 64,800
+# 129,600
 
 # input current state
 # output boundary
@@ -61,64 +61,8 @@ def log_important_info(info: str):
   # only use this for crtical information
   with open(LOG_FILE, "a") as f:
     f.write(f"[{datetime.datetime.now()}] {info}\n")
-class TestCase:
-  def __init__(self, z, v, dist, g_theta, g1z, end_dist, end_theta, g2z):
-    # first gate position (z is the only one that really matters xy are there from legacy cocde)
-    self.x = 0
-    self.y = -1.5
-    self.z = z
-    
-    # first gate velocity
-    self.v = v
-    
-    # theta relative to each previous gate, in this implementation theta should always be zero (relative to nothing)
-    self.theta_rel = [0, g_theta, end_theta]
-    
-    self.theta = 0
-    
-    # (dist, g_theta) is the polar coordinates from first gate to second gate
-    self.dist = dist
-    # here we modify g_theta to be second gate angle in global frame
-    # note that this is sort of legacy since self.theta is fixed to be zero
-    g_theta += self.theta
-    g_theta = np.arctan2(np.sin(g_theta), np.cos(g_theta)) 
-    self.g_theta = g_theta
-    # z position of second gate
-    self.g1z = g1z
-    
-    # (end_dst, end_theta) is the polar coordinates from second gate to third gate
-    self.end_dist = end_dist
-    # modify end_theta to be third gate angle in global frame
-    end_theta += g_theta
-    end_theta = np.arctan2(np.sin(end_theta), np.cos(end_theta))
-    self.end_theta = end_theta
-    # z position of third gate
-    self.g2z = g2z
-    
-    # optimal values that needed to be calculated for this test_case
-    self.optimal_velocity = None
-    self.optimal_time = None
-  
-  @staticmethod
-  def get_header():
-    # header for csv file
-    # v0: velocity @ gate 1
-    # z0: z position @ gate 1
-    # d1: distance from gate 1 to gate 2
-    # theta1: angle from gate 1 to gate 2
-    # z1: z position @ gate 2
-    # d2: distance from gate 2 to gate 3
-    # theta2: angle from gate 2 to gate 3
-    # z2: z position @ gate 3
-    # best_v: optimal velocity for gate 1
-    # best_t: optimal time for gate 1
-    return "v0,z0,d1,theta1,z1,d2,theta2,z2,best_v,best_t"
-  
-  def __str__(self):
-    # returns all fields in class as a comma separated string ordered by the get_header output
-    return f"{self.v},{self.z},{self.dist},{self.theta_rel[1]},{self.g1z},{self.end_dist},{self.theta_rel[2]},{self.g2z},{self.optimal_velocity},{self.optimal_time}"
 
-def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
+def run_env(test_case, bv, bt, gui=False, print_accel_limits=False, return_vals=False):
   # bv: velocity to test at gate 1
   # bt: time to test at gate 1
   
@@ -199,7 +143,7 @@ def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
   total_deviation = 0
   total_dist = 0
   
-  if ACCEL_VECTOR:
+  if ACCEL_VECTOR and not return_vals:
     for a1, a2, a3, v1, v2, v3 in zip(ctrl.ref_acc[0], ctrl.ref_acc[1], ctrl.ref_acc[2], ctrl.ref_vel[0], ctrl.ref_vel[1], ctrl.ref_vel[2]):
       a = np.linalg.norm(np.array([a1, a2, a3]))
       v = np.linalg.norm(np.array([v1, v2, v3]))
@@ -208,7 +152,7 @@ def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
       
       if abs(a) > PARABOLA_SHAPE * (v**2) + PARABOLA_INTERCEPT:
         return -ACCEL_COST
-  else:  
+  elif not return_vals:  
     for xyz in range(3):
       for a, v in zip(ctrl.ref_acc[xyz], ctrl.ref_vel[xyz]):
         if v > VEL_LIMIT_COST:
@@ -282,10 +226,39 @@ def run_env(test_case, bv, bt, gui=False, print_accel_limits=False):
   
   accel_range = (np.max(ctrl.ref_acc) - np.min(ctrl.ref_acc)) / np.max(np.abs(ctrl.ref_acc))
 
+  if return_vals:
+    return abs(cumulative_reward), skipped_waypoints, average_error, accel_range
+  
   return -CRASH_COST * abs(cumulative_reward) - \
           SKIPPED_WAYPOINT_COST*skipped_waypoints - \
             TRACKING_COST * average_error - TIME_COST * bt - \
               ACCEL_RANGE_COST * accel_range
+
+def get_relevant_vals(z, v, dist, g_theta, g1z, end_dist, end_theta, g2z):
+  """
+    Returns a list of relevant values for the test case
+  """
+  test_cases = []
+  for bv in np.linspace(EXIT_VELOCITY_MIN, EXIT_VELOCITY_MAX, EXIT_VELOCITY_STEP):
+    # calculates time to linearly accelerate/decelerate between gate 1 and 2
+    t_linear = 2 * dist / (bv + v)
+    # if we are testing starting at stopping at 0 m/s let's just use 
+    # 1.5 seconds as can't divide by zero
+    if bv + v == 0:
+      t_linear = 1.5
+    # sample half the linear time to 1.1 times the linear time
+    # favors going faster than linear acceleration/deceleration
+    for bt in np.linspace(0.5 * t_linear, 1.1 * t_linear, 7):
+      test_case = TestCase(z, v, dist, g_theta, g1z, end_dist, end_theta, g2z)
+      cumulative_reward, skipped_waypoints, average_error, accel_range = run_env(test_case, bv, bt, return_vals=True)
+      test_case.optimal_velocity = bv
+      test_case.optimal_time = bt
+      test_case.crashes = cumulative_reward
+      test_case.skipped_waypoints = skipped_waypoints
+      test_case.average_error = average_error
+      test_case.accel_range = accel_range
+      test_cases.append(test_case)
+  return test_cases
 
 def get_optimal_vals(test_case):
   """
@@ -327,7 +300,7 @@ def run_process(id, num_processes):
             for z in [0.3, 0.525]:
               for g1z in [0.3, 0.525]:
                 for g2z in [0.3, 0.525]:
-                  test_case = TestCase(z, v, dist, g_theta, g1z, end_dist, end_theta, g2z)
+                  test_case = [z, v, dist, g_theta, g1z, end_dist, end_theta, g2z]
                   test_case_list.append(test_case)
     
   random.seed(42)
@@ -344,16 +317,11 @@ def run_process(id, num_processes):
   to_process = split_list(test_case_list, num_processes)[id]
   
   for test_case in to_process:
-    output = get_optimal_vals(test_case)
-    optimal_v, optimal_t = output
-    if optimal_t < 0 or optimal_v < 0:
-      log_important_info(f"This test case {str(test_case)} had an invalid output")
-      continue
-    test_case.optimal_velocity = optimal_v
-    test_case.optimal_time = optimal_t
+    output = get_relevant_vals(*test_case)
     # with open has a built in lock / unlock system to be process and thread safe
     with open(DATA_FILE, "a") as f:
-      f.write(str(test_case) + "\n")
+      for tc in output:
+        f.write(str(tc) + "\n")
 
 def main():  
   with open(DATA_FILE, "w") as f:
@@ -377,7 +345,6 @@ def main():
 
 # if testing is included as an arg then run these tests instead of generating all test data
 if "testing" in ''.join(argv):
-  
   # Copied from `build_supervised_demo.py`
   # NOTE(shreepa): MAKE SURE THAT THE FIRST GATE IS TAKEOFF POSITION AND LAST TWO GATES ARE DUMMY GATES WHEN RUNNING BUILD DEMO
   gate_x = [-1.0, -1.0, -0.42465867716842287, 0.4186388189488832, 1.0747105836281534, 1.2620918982138778, 1.4494732127996022]
