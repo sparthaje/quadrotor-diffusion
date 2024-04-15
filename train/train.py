@@ -7,14 +7,37 @@ from sklearn.model_selection import train_test_split
 from torchview import draw_graph
 import matplotlib.pyplot as plt
 import datetime
+import random
 
 from model import BoundaryPredictor
+
+# HYPERPARAMETERS
+
+# Data Preprocessing
+## If best_v is 0, replace it with a small value (OPTIONAL)
+ZERO_EQ = 0.0
+
+# Loss
+## Epsilon value for the custom loss function (divide by for zero)
+EPSILON = 0.1
+## Weight for the higher speed loss
+W_L = 5.0
+## Weight for lower speed loss
+W_R = 0.8
+
+# Training
+EPOCHS = 1000
+BATCH_SIZE = 1280
+## Patience for early stopping (higher value means more epochs)
+PATIENCE = 100
+## Random bound for adding noise to the input data
+## RANDOM_BOUND * Unif(0,1) * N(0,1)
+RANDOM_BOUND = 0.1
+
 
 # Load the dataset
 dataset = pd.read_csv('data.csv')
 
-# If best_v is 0, replace it with a small value (OPTIONAL)
-ZERO_EQ = 0.0
 dataset.loc[dataset['best_v'] == 0, 'best_v'] = ZERO_EQ
 
 # Normalize the dataset
@@ -61,13 +84,11 @@ class CustomLoss(torch.nn.Module):
     super(CustomLoss, self).__init__()
 
   def forward(self, outputs, targets):
-    # loss = torch.mean((outputs - targets) ** 2)
-    epsilon = 0.1
-    percent_errors = (outputs - targets) / (targets + epsilon)
+    percent_errors = (outputs - targets) / (targets + EPSILON)
     percent_errors[:, 1] = -percent_errors[:, 1]  # this way -time indicates slower
     loss = torch.mean(torch.where(percent_errors >= 0, 
-                                       5 * percent_errors,  # worse to go fast
-                                       -0.8 * percent_errors)) # better to go slow
+                                       W_L * percent_errors,  # worse to go fast
+                                      -W_R * percent_errors)) # better to go slow
     return loss
 
 # Create an instance of the custom loss function
@@ -76,24 +97,22 @@ criterion_test = CustomLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.8) 
 
-batch_size = 1280
-train_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
-test_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
+train_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=True)
+test_loader = torch.utils.data.DataLoader(dataset=torch.utils.data.TensorDataset(X_test, y_test), batch_size=BATCH_SIZE, shuffle=False)
 
 # Train the model
 loss_list = []
 test_loss_list = []
-num_epochs = 1000
 lowest_test_loss = float('inf')
 counter = 0
-patience = 100
 best_model = None
 
-for epoch in range(num_epochs):
+for epoch in range(EPOCHS):
     model.train()  # Set model to training mode
     for batch_X, batch_y in train_loader:
+        rbx = batch_X + RANDOM_BOUND * random.random() * torch.randn(batch_X.shape)
         optimizer.zero_grad()
-        outputs = model(batch_X)
+        outputs = model(rbx)
         loss = criterion(outputs, batch_y)
         loss.backward()
         optimizer.step()
@@ -117,12 +136,12 @@ for epoch in range(num_epochs):
             counter += 1
 
     if (epoch + 1) % 10 == 0:
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Test Loss: {avg_test_loss:.4f}, Best Test Loss: {lowest_test_loss:.4f}')
+        print(f'Epoch [{epoch + 1}/{EPOCHS}], Test Loss: {avg_test_loss:.4f}, Best Test Loss: {lowest_test_loss:.4f}')
         
     test_loss_list.append(avg_test_loss)
     
-    if counter >= patience:
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Test Loss: {avg_test_loss:.4f}, Best Test Loss: {lowest_test_loss:.4f}')
+    if counter >= PATIENCE:
+        print(f'Epoch [{epoch + 1}/{EPOCHS}], Test Loss: {avg_test_loss:.4f}, Best Test Loss: {lowest_test_loss:.4f}')
         break
 
 if best_model is not None:

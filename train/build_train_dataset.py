@@ -63,9 +63,9 @@ def find_best_v_t(group):
   return pd.Series([best_row["v1"], best_row["t1"]])
 
 # Load initial data frame
-df = pd.read_csv("data.csv")
+df = pd.read_csv("/home/shreepa/data.csv")
 grouped = df.groupby(list(df.columns[:8])).apply(lambda x: find_best_v_t(x))
 grouped = grouped.reset_index()
 grouped = grouped.rename(columns={0: 'best_v', 1: 'best_t'})
-print(grouped)
+grouped.to_csv("data.csv", index=False)
 
