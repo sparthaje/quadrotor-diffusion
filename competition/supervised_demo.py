@@ -64,6 +64,7 @@ model.eval()
 print(newest_file_in_directory("../models"))
 model.load_state_dict(torch.load(newest_file_in_directory("../models")))
 model.eval()
+normalized_vals = {'best_v': 1.5555555555555554, 'best_t': 2.25, 'v0': 2.0}
 
 boundary_conditions = []
 boundary_conditions.append([
@@ -80,7 +81,7 @@ print("Inputs normalized, outputs not normalized")
 for gx, gy, gz, h, gt, d, ra in list(zip(gate_x, gate_y, gate_z, heights, gate_theta, d_vals, rel_angles))[:-1]:
   # v0,z0,d1,theta1,z1,d2,theta2,z2,best_v,best_t
   inputs = np.array([
-    np.linalg.norm(boundary_conditions[-1][2]) / 2.0,  # v_0
+    np.linalg.norm(boundary_conditions[-1][2]) / normalized_vals["v0"],  # v_0
     (h[0] == 0.3) * 1.0,  # z_0
     
     (d[1] - 0.8) / (1.5 - 0.8),  # d_1
@@ -95,9 +96,10 @@ for gx, gy, gz, h, gt, d, ra in list(zip(gate_x, gate_y, gate_z, heights, gate_t
   x = list(inputs)
   inputs = torch.tensor(inputs, dtype=torch.float32)
   v, t = model(inputs).detach().numpy()
+  v = v * normalized_vals["best_v"]
+  t = t * normalized_vals["best_t"]
   if optimal_vals is not None:
     v, t = optimal_vals[i]
-  v, t = v, t
   print(x, v, t)
   print('-----')
   

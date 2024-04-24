@@ -40,10 +40,18 @@ dataset = pd.read_csv('data.csv')
 
 dataset.loc[dataset['best_v'] == 0, 'best_v'] = ZERO_EQ
 
+normalizing_vals = {
+  "best_v": dataset["best_v"].max(),
+  "best_t": dataset["best_t"].max(),
+  "v0": dataset["v0"].max(),
+}
+
+print(normalizing_vals)
+
 # Normalize the dataset
-dataset["best_v"] = dataset["best_v"] / 2.0
-dataset["best_t"] = dataset["best_t"] / 2.0
-dataset["v0"] = dataset["v0"] / 2.0
+dataset["best_v"] = dataset["best_v"] / normalizing_vals["best_v"]
+dataset["best_t"] = dataset["best_t"] / normalizing_vals["best_t"]
+dataset["v0"] = dataset["v0"] / normalizing_vals["v0"]
 
 dataset["d1"] = (dataset["d1"] - 0.8) / (1.5 - 0.8)
 dataset["d2"] = (dataset["d2"] - 0.8) / (1.5 - 0.8)
