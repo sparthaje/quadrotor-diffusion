@@ -21,7 +21,7 @@ ZERO_EQ = 0.0
 ## Epsilon value for the custom loss function (divide by for zero)
 EPSILON = 0.1
 ## Weight for the higher speed loss
-W_L = 5.0
+W_L = 2.0
 ## Weight for lower speed loss
 W_R = 0.8
 
