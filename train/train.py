@@ -94,9 +94,12 @@ class CustomLoss(torch.nn.Module):
   def forward(self, outputs, targets):
     percent_errors = (outputs - targets) / (targets + EPSILON)
     percent_errors[:, 1] = -percent_errors[:, 1]  # this way -time indicates slower
-    loss = torch.mean(torch.where(percent_errors >= 0, 
-                                       W_L * percent_errors,  # worse to go fast
-                                      -W_R * percent_errors)) # better to go slow
+    alpha = 10.0
+    weights = torch.sigmoid(alpha * percent_errors)
+    loss = torch.mean(weights * W_L * percent_errors + (1 - weights) * (-W_R * percent_errors))
+    # loss = torch.mean(torch.where(percent_errors >= 0, 
+    #                                    W_L * percent_errors,  # worse to go fast
+    #                                   -W_R * percent_errors)) # better to go slow
     return loss
 
 # Create an instance of the custom loss function
