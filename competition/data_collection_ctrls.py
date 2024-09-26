@@ -106,9 +106,9 @@ class Controller():
                 coeffs[xyz].append(list(coeff))
 
                 t = np.linspace(0, b_f[0], int(b_f[0] * self.CTRL_FREQ))
-                self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t))
-                self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t))
-                self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t))
+                self.ref_pos[xyz] = np.append(self.ref_pos[xyz], np.polyval(coeff, t)[1:])
+                self.ref_vel[xyz] = np.append(self.ref_vel[xyz], np.polyval(np.polyder(coeff, 1), t)[1:])
+                self.ref_acc[xyz] = np.append(self.ref_acc[xyz], np.polyval(np.polyder(coeff, 2), t)[1:])
                 
             # print("Max vels:", max(self.ref_vel[0]), max(self.ref_vel[1]), max(self.ref_vel[2]))
             # print("Min vels:", min(self.ref_vel[0]), min(self.ref_vel[1]), min(self.ref_vel[2]))
@@ -126,12 +126,58 @@ class Controller():
             target_yaw_vicon_map = b_f[5] + np.pi / 4
             target_yaw_vicon_map = np.arctan2(np.sin(target_yaw_vicon_map), np.cos(target_yaw_vicon_map))
             Yaws.append(target_yaw_vicon_map)
+            
+        def compute_velocities(positions):
+            # Time step between positions (in seconds)
+            delta_t = 1/self.CTRL_FREQ
+            
+            # Compute the difference between consecutive positions for each dimension
+            delta_x = np.diff(positions[0])
+            delta_y = np.diff(positions[1])
+            delta_z = np.diff(positions[2])
+            
+            # Calculate velocity for each dimension: v = delta_position / delta_t
+            velocities_x = delta_x / delta_t
+            velocities_y = delta_y / delta_t
+            velocities_z = delta_z / delta_t
+            
+            # Combine the velocities into a single array
+            velocities = np.column_stack((velocities_x, velocities_y, velocities_z))
+            velocities = np.row_stack((np.array([0.0, 0.0, 0.0]), velocities))
+            print(velocities.shape)
+            
+            return velocities
+        
+        def compute_accelerations(velocities):
+            # Time step between velocity measurements (in seconds)
+            delta_t = 1/self.CTRL_FREQ
+            
+            # Compute the difference between consecutive velocities for each dimension
+            delta_vx = np.diff(velocities[:, 0])
+            delta_vy = np.diff(velocities[:, 1])
+            delta_vz = np.diff(velocities[:, 2])
+            
+            # Calculate acceleration for each dimension: a = delta_velocity / delta_t
+            accelerations_x = delta_vx / delta_t
+            accelerations_y = delta_vy / delta_t
+            accelerations_z = delta_vz / delta_t
+            
+            # Combine the accelerations into a single array
+            accelerations = np.column_stack((accelerations_x, accelerations_y, accelerations_z))
+            
+            # Add a row of zeros at the beginning to match the shape of the velocities array
+            accelerations = np.row_stack((np.array([0, 0, 0]), np.array([0, 0, 0]), accelerations))
+            
+            return accelerations
+        
+        # self.ref_vel = compute_velocities(self.ref_pos)
+        # self.ref_acc = compute_accelerations(self.ref_vel)
 
-        for xyz in range(3):
-            assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz]) and len(self.ref_acc[xyz]) == len(self.ref_yaw)
+        # for xyz in range(3):
+        #     assert len(self.ref_pos[xyz]) == len(self.ref_vel[xyz]) and len(self.ref_vel[xyz]) == len(self.ref_acc[xyz]) and len(self.ref_acc[xyz]) == len(self.ref_yaw)
         
         assert len(self.ref_pos[0]) == len(self.ref_pos[1]) and len(self.ref_pos[1]) == len(self.ref_pos[2])
-        assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
+        # assert len(self.ref_vel[0]) == len(self.ref_vel[1]) and len(self.ref_vel[1]) == len(self.ref_vel[2])
         assert len(self.ref_acc[0]) == len(self.ref_acc[1]) and len(self.ref_acc[1]) == len(self.ref_acc[2])
 
         print("Max vels:", max(self.ref_vel[0]), max(self.ref_vel[1]), max(self.ref_vel[2]))
@@ -313,8 +359,12 @@ class Controller():
         if iteration < self.CTRL_FREQ*self.CTRL_FREQ:
             step = min(iteration, len(self.ref_pos[0]) - 1)
             target_pos = np.array([self.ref_pos[0][step], self.ref_pos[1][step], self.ref_pos[2][step]])
+            
             target_vel = np.array([self.ref_vel[0][step], self.ref_vel[1][step], self.ref_vel[2][step]])
             target_acc = np.array([self.ref_acc[0][step], self.ref_acc[1][step], self.ref_acc[2][step]])            
+
+            # target_vel = self.ref_vel[step]
+            # target_acc = self.ref_acc[step]       
             # target_yaw = self.initial_obs[8] #+ np.pi/2
             # target_yaw = np.arctan2(np.sin(target_yaw), np.cos(target_yaw))
             target_yaw = self.ref_yaw[step]

@@ -5,7 +5,7 @@ import os
 import numpy as np
 from time import sleep
 import torch
-from train.model import BoundaryPredictor
+from old_model_training.model import BoundaryPredictor
 from sys import argv
 import pandas as pd
 
@@ -39,13 +39,13 @@ GENERATE_CSV = "gen_csv" in argv
 
 # Copied from `build_supervised_demo.py`
 # NOTE(shreepa): MAKE SURE THAT THE FIRST GATE IS TAKEOFF POSITION AND LAST TWO GATES ARE DUMMY GATES WHEN RUNNING BUILD DEMO
-gate_x = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-gate_y = [-1.7, -0.7, 0.30000000000000004, 1.3, 2.3, 3.3]
-gate_z = [1, 1, 1, 1, 1, 1]
-heights = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3]
-gate_theta = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-d_vals = [0, 1.0, 1.0, 1.0, 1.0, 1.0]
-rel_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+gate_x = [1.0, 0.29289321881345254, 0.29289321881345254, 1.0, 0.9999999999999999, 0.2928932188134523, -0.41421356237309526]
+gate_y = [-1.7, -0.9928932188134524, 0.007106781186547617, 0.7142135623730953, 1.7142135623730952, 2.4213203435596427, 3.12842712474619]
+gate_z = [1, 0, 0, 1, 1, 1, 1]
+heights = [0.3, 0.525, 0.525, 0.3, 0.3, 0.3, 0.3]
+gate_theta = [0.7853981633974483, 0.0, -0.7853981633974482, 1.1102230246251565e-16, 0.7853981633974484, 0.7853981633974484, 0.7853981633974484]
+d_vals = [0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+rel_angles = [0.7853981633974483, -0.7853981633974483, -0.7853981633974483, 0.7853981633974483, 0.7853981633974483, 0.0, 0.0]
 
 gate_x = gate_x[:-2]
 gate_y = gate_y[:-2]
