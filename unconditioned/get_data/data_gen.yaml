@@ -3,10 +3,11 @@ use_firmware: True # Whether to use pycffirmware or not (NOTE: only set to False
 
 # Data generation guidelines
 data:
-  num_samples: 100  # how many samples to generate
-  num_segments: 4   # min-snap segments to join together
-  total_time: 12    # total trajectory length (s)
-  max_avg_dev: 7.5  # max average deviation allowed on data set trajectory (cm)
+  num_processes: 1  # will take min of this or number of cores available
+  num_samples: 10   # how many samples to generate
+  num_segments: 4    # min-snap segments to join together
+  total_time: 12     # total trajectory length (s)
+  max_avg_dev: 7.5   # max average deviation allowed on data set trajectory (cm)
   lims:
     x: [-1.5, 1.5]
     y: [-2, 2]

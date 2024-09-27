@@ -37,6 +37,7 @@ LIMS         = DATA_CONFIG["lims"]
 TOTAL_TIME   = DATA_CONFIG["total_time"]
 NUM_SAMPLES  = DATA_CONFIG["num_samples"]
 MAX_AVG_DEV  = DATA_CONFIG["max_avg_dev"] * 0.01
+NUM_CORES    = DATA_CONFIG["num_processes"]
 
 def sample_random_trajectory():
   pos_bounds = np.column_stack((
@@ -143,22 +144,43 @@ def get_valid_random_trajectory():
     if trajectory_is_valid(trajectory):
         return trajectory, attempt
 
+def generate(num_samples, starting_sample):
+  total_attempts = 0
+  
+  for i in range(num_samples):
+    filename             = f"data/{starting_sample + i}.npy"
+    trajectory, attempts = get_valid_random_trajectory()
+    total_attempts       += attempts
+    
+    np.save(filename, trajectory[:, 0, :])
+  
+  return total_attempts
+  
 def main():
   existing_samples  = [int(f.split('.')[0]) for f in os.listdir("data") if f.endswith('.npy')]
   last_sample_saved = 0 if len(existing_samples) == 0 else max(existing_samples)
-  # Number of total attempts used to create `num_samples` valid trajectories
-  total_attempts    = 0
-  
   start_time = time.time()
-  for i in range(NUM_SAMPLES):
-    filename = f"data/{last_sample_saved + i}.npy"
-    trajectory, attempts = get_valid_random_trajectory()
-    # np.save(filename, trajectory)
-    total_attempts += attempts
-  total_time = time.time() - start_time
   
+  cores = min(NUM_CORES, multiprocessing.cpu_count())
+  print(f"Generating with {cores} cores")
+  
+  pool             = multiprocessing.Pool(processes=cores)
+  attempts         = []
+  samples_per_core = NUM_SAMPLES // cores
+  
+  for core in range(cores):
+    starting_at_sample_num = last_sample_saved + samples_per_core*core
+    result = pool.apply_async(generate, (int(samples_per_core), starting_at_sample_num))
+    attempts.append(result)
+  
+  pool.close()
+  pool.join()
+  
+  # Number of total attempts used to create `num_samples` valid trajectories
+  total_attempts   = sum([a.get() for a in attempts])
+  total_time       = time.time() - start_time
   average_attempts = total_attempts / NUM_SAMPLES
-  print(f"Created {NUM_SAMPLES} samples using {average_attempts} attempts on average in {total_time}s")
+  print(f"Created {NUM_SAMPLES} samples using {average_attempts} attempts on average in {total_time:.2f}s")
 
 if __name__ == "__main__":
   main()
