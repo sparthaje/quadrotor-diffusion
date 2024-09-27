@@ -231,11 +231,9 @@ class FirmwareWrapper(BaseController):
                     [self.setpoint.position.x, self.setpoint.position.y, self.setpoint.position.z],
                     p.getQuaternionFromEuler([0,0,0]),
                     physicsClientId=self.pyb_client)
-
-        # NOTE(shreepa): the default implementation for some reason returns the very last reward, done, info, and action
-        # after running a higher number of environment steps on the same action (prob to better simulate)
-        # this can have the affect of missing out on a crash if it happens in the middle of a tick 
-        # so imma just return the min reward (also possible to return average or median but i think min is best)
+            
+        # NOTE(shreepa): I have changed the reward function to propagate up if a crash happened, this means between ticks
+        # I care most about the lowest reward value
         min_reward = float('inf')
         while self.tick / self.firmware_freq < sim_time + self.ctrl_dt:
             # Step the environment and print all returned information.
