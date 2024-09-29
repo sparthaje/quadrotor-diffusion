@@ -1,5 +1,5 @@
 # Sample to visualize
-SAMPLE_NUM   = 100
+SAMPLE_NUM = 4682
 
 from functools import partial
 
@@ -11,11 +11,11 @@ import argparse
 from safe_control_gym.utils.configuration import ConfigFactory
 from safe_control_gym.utils.registration import make
 
-from traj_generator import (
+from get_data.traj_generator import (
   derive_target_velocities,
   derive_target_accelerations
 )
-from plotting_utils import (
+from get_data.plotting_utils import (
   plot_reference_time_series,
   view_reference_in_3d,
   draw_trajectory_on_pybullet
@@ -26,7 +26,7 @@ parser.add_argument('--overrides', type=str, help='Config file')
 args = parser.parse_args()
 
 with open(args.overrides, 'r') as file:
-  CONFIG      = yaml.safe_load(file)
+  CONFIG = yaml.safe_load(file)
 
 DATA_CONFIG = CONFIG["data"]
 CTRL_FREQ   = CONFIG["quadrotor_config"]["ctrl_freq"]

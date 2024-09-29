@@ -30,10 +30,6 @@ def get_positions_from_boundary_conditions(boundaries, segment_lengths, CTRL_FRE
       boundaries (np.ndarray): np.array[][]
       segment_length: float[]
   """
-  ref_vel = np.array([])
-  ref_acc = np.array([])
-  ref_yaw = []
-  T       = []
   ref_pos = []
   
   for segment, segment_length in zip(boundaries, segment_lengths):

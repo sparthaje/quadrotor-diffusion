@@ -53,13 +53,13 @@ def view_reference_in_3d(reference):
 
   # Plot the remaining positions
   ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], 
-          marker='o', color='blue', label='Position Path')
+          marker='o', color='blue', label='Path')
 
   # Set labels
   ax.set_xlabel('X Position')
   ax.set_ylabel('Y Position')
   ax.set_zlabel('Z Position')
-  ax.set_title('3D Position Path with Unique Start Point')
+  ax.set_title('Trajectory')
   ax.legend()
 
   # Show the plot

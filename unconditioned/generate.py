@@ -11,12 +11,12 @@ import argparse
 from safe_control_gym.utils.configuration import ConfigFactory
 from safe_control_gym.utils.registration import make
 
-from traj_generator import (
+from get_data.traj_generator import (
   get_positions_from_boundary_conditions,
   derive_target_velocities,
   derive_target_accelerations
 )
-from plotting_utils import (
+from get_data.plotting_utils import (
   plot_reference_time_series,
   view_reference_in_3d,
   draw_trajectory_on_pybullet
@@ -29,9 +29,9 @@ args = parser.parse_args()
 with open(args.overrides, 'r') as file:
   CONFIG      = yaml.safe_load(file)
 
-DATA_CONFIG = CONFIG["data"]
-CTRL_FREQ   = CONFIG["quadrotor_config"]["ctrl_freq"]
-USING_GUI   = CONFIG["quadrotor_config"]["gui"]
+DATA_CONFIG  = CONFIG["data"]
+CTRL_FREQ    = CONFIG["quadrotor_config"]["ctrl_freq"]
+USING_GUI    = CONFIG["quadrotor_config"]["gui"]
 NUM_SEGMENTS = DATA_CONFIG["num_segments"]
 LIMS         = DATA_CONFIG["lims"]
 TOTAL_TIME   = DATA_CONFIG["total_time"]

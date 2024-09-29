@@ -4,7 +4,8 @@ use_firmware: True # Whether to use pycffirmware or not (NOTE: only set to False
 # Data generation guidelines
 data:
   num_processes: 1  # will take min of this or number of cores available
-  num_samples: 10   # how many samples to generate
+  num_samples: 50000   # how many samples to generate
+
   num_segments: 4    # min-snap segments to join together
   total_time: 12     # total trajectory length (s)
   max_avg_dev: 7.5   # max average deviation allowed on data set trajectory (cm)
@@ -13,15 +14,20 @@ data:
     y: [-2, 2]
     z: [0.3, 0.525]
 
-    vx: [-1.0, 1.0]
-    vy: [-1.0, 1.0]
-    vz: [-0.3, 0.3]
+    # This takes way longer, but its good to have faster trajectories in dataset
+    vx: [-1.5, 1.5]
+    vy: [-1.5, 1.5]
+    vz: [-0.5, 0.5]
+
+    # vx: [-1.0, 1.0]
+    # vy: [-1.0, 1.0]
+    # vz: [-0.3, 0.3]
 
     ax: [-1.0, 1.0]
     ay: [-1.0, 1.0]
     az: [-0.3, 0.3]
 
-    gv:  # parabola of shape * ||v||^exp + intercept
+    gv:  # polynomial of shape * ||v||^exp + intercept
       shape: -0.3
       intercept: 2.0
       exp: 3
