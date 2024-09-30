@@ -64,6 +64,44 @@ def view_reference_in_3d(reference):
 
   # Show the plot
   plt.show()
+  
+def view_references_in_3d(positions_list, titles):
+    # Calculate global min and max for axis limits
+    all_positions = np.vstack(positions_list)
+    x_min, x_max = all_positions[:, 0].min(), all_positions[:, 0].max()
+    y_min, y_max = all_positions[:, 1].min(), all_positions[:, 1].max()
+    z_min, z_max = all_positions[:, 2].min(), all_positions[:, 2].max()
+
+    # Set up the figure and axes for subplots
+    num_positions = len(positions_list)
+    fig = plt.figure(figsize=(5 * num_positions, 7))  # Adjust size for all subplots
+
+    for i, positions in enumerate(positions_list):
+        ax = fig.add_subplot(1, num_positions, i + 1, projection='3d')
+
+        # Plot the first point with a unique marker
+        ax.scatter(positions[0, 0], positions[0, 1], positions[0, 2], 
+                   color='red', s=100, label='Start Point', marker='o')  # Unique marker for the first point
+
+        # Plot the remaining positions
+        ax.scatter(positions[:, 0], positions[:, 1], positions[:, 2], 
+                marker='o', color='blue', label='Path')
+
+        # Set labels and title for each subplot
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        ax.set_zlabel('Z Position')
+        ax.set_title(f'Trajectory at t={titles[i]}')
+        ax.legend()
+
+        # Set the same axis limits for all subplots
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.set_zlim(z_min, z_max)
+
+    # Adjust layout for better spacing
+    plt.tight_layout()
+    plt.show()
 
 def draw_trajectory_on_pybullet(initial_info,
                     ref_x,
