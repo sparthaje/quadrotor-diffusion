@@ -1,0 +1,14 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/tensorrt:23.08-py3
+
+%environment
+    export PATH=/opt/conda/bin:$PATH
+
+%post
+    # Update and install apt packages
+    apt update && apt install -y \
+        swig \
+        build-essential
+
+%files
+    # Nothing rn

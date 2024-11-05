@@ -151,7 +151,6 @@ def generate(num_samples, starting_sample):
     filename             = f"data/{starting_sample + i}.npy"
     trajectory, attempts = get_valid_random_trajectory()
     total_attempts       += attempts
-    
     np.save(filename, trajectory[:, 0, :])
   
   return total_attempts
@@ -164,17 +163,24 @@ def main():
   cores = min(NUM_CORES, multiprocessing.cpu_count())
   print(f"Generating with {cores} cores")
   
-  pool             = multiprocessing.Pool(processes=cores)
-  attempts         = []
-  samples_per_core = NUM_SAMPLES // cores
+  attempts = []
+
+  if NUM_CORES == 1:
+    attempts.append(
+      generate(NUM_SAMPLES, last_sample_saved)
+    )
   
-  for core in range(cores):
-    starting_at_sample_num = last_sample_saved + samples_per_core*core
-    result = pool.apply_async(generate, (int(samples_per_core), starting_at_sample_num))
-    attempts.append(result)
-  
-  pool.close()
-  pool.join()
+  else:
+    pool             = multiprocessing.Pool(processes=cores)
+    samples_per_core = NUM_SAMPLES // cores
+    
+    for core in range(cores):
+      starting_at_sample_num = last_sample_saved + samples_per_core*core
+      result = pool.apply_async(generate, (int(samples_per_core), starting_at_sample_num))
+      attempts.append(result)
+    
+    pool.close()
+    pool.join()
   
   # Number of total attempts used to create `num_samples` valid trajectories
   total_attempts   = sum([a.get() for a in attempts])
