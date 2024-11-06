@@ -1,8 +1,11 @@
 # Firmware for simulator
 pycffirmware
 
+############### DATA ###############
 unconditioned/data/*
+data/
 
+######### PYTHON GITIGNORE #########
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
