@@ -8,6 +8,9 @@ class Normalizer:
     def undo(self, normalized_array):
         raise NotImplementedError("Subclass must implement the unod method")
 
+    def __str__(self):
+        raise NotImplementedError("__str__ not done")
+
 
 class NoNormalizer:
     """
@@ -19,6 +22,9 @@ class NoNormalizer:
 
     def undo(self, normalized_array):
         return normalized_array
+
+    def __str__(self):
+        return "NoNormalizer"
 
 
 class GuassianNormalizer(Normalizer):
@@ -37,3 +43,6 @@ class GuassianNormalizer(Normalizer):
     def undo(self, normalized_array):
         original_array = (normalized_array * np.sqrt(self.variance)) + self.mean
         return original_array
+
+    def __str__(self):
+        return f"GuassianNormalizer: µ = {self.mean}, s = {self.variance}"

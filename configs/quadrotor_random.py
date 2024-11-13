@@ -33,12 +33,15 @@ train_args = TrainerArgs(
     save_freq=5,
 
     learning_rate=2e-4,
-    num_gpus=1,
+    num_gpus=4,
     device="cuda",
 
-    max_epochs=39
+    max_epochs=50
 )
 
-normalizer = NoNormalizer()
+normalizer = GuassianNormalizer(
+    mean=np.array([0., 0., 0.]),
+    variance=np.array([1.3, 1.3, 0.02]),
+)
 
 dataset = QuadrotorTrajectoryDataset('data/quadrotor_random', normalizer)

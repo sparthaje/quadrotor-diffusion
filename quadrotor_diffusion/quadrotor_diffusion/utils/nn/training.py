@@ -49,7 +49,10 @@ class Trainer:
     def test_forward_pass(self):
         start = time.time()
         first_item: torch.Tensor = next(iter(self.train_data_loader)).to(self.args.device)
-        self.model.compute_loss(first_item)
+        if isinstance(self.model, nn.DataParallel):
+            self.model.module.compute_loss(first_item)
+        else:
+            self.model.compute_loss(first_item)
         duration = time.time() - start
         print(f"Forward pass succeeded in {duration:.2f}")
 
@@ -122,8 +125,10 @@ class Trainer:
 
         with open(os.path.join(self.args.log_dir, "overview.txt"), "w") as f:
             f.write(dataclass_to_table(self.args) + "\n")
-            f.write(dataclass_to_table(self.model.diffusion_args) + "\n")
-            f.write(dataclass_to_table(self.model.unet_args) + "\n")
+            f.write(dataclass_to_table(self.model.module.diffusion_args if isinstance(
+                self.model, nn.DataParallel) else self.model.diffusion_args) + "\n")
+            f.write(dataclass_to_table(self.model.module.unet_args if isinstance(
+                self.model, nn.DataParallel) else self.model.unet_args) + "\n")
             f.write(f"\nDataset: {type(self.train_data_loader.dataset)}\n")
             f.write(f"Normalization: {self.train_data_loader.dataset.normalizer}\n\n")
 

@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 import torch.nn as nn
 
@@ -6,6 +8,10 @@ from quadrotor_diffusion.models.losses import MSELoss
 from quadrotor_diffusion.models.temporal import Unet1D
 from quadrotor_diffusion.utils.nn.args import Unet1DArgs, DiffusionWrapperArgs
 from quadrotor_diffusion.utils.logging import iprint as print
+
+# TODO(shreepa): Probably should fix this at some point
+# Suppress FutureWarning for this specific issue
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*torch.load.*weights_only=False.*")
 
 
 class DiffusionWrapper(nn.Module):
@@ -36,6 +42,12 @@ class DiffusionWrapper(nn.Module):
         alpha = 1. - betas
         alpha_bar = torch.cumprod(alpha, axis=0)
         self.register_buffer('alpha_bar', alpha_bar)
+        alpha_bar_prev = torch.cat([torch.ones(1), alpha_bar[:-1]])
+        posterior_variance = betas * \
+            (1. - alpha_bar_prev) / (1. - alpha_bar)
+        self.register_buffer('posterior_variance', posterior_variance)
+        self.register_buffer('posterior_log_variance_clipped',
+                             torch.log(torch.clamp(posterior_variance, min=1e-20)))
 
         if loss == "MSELoss":
             self.loss = MSELoss()
@@ -75,3 +87,57 @@ class DiffusionWrapper(nn.Module):
         loss = self.loss(model_output, target)
 
         return loss
+
+    @torch.no_grad()
+    def sample_unguided(self, batch_size: int, horizon: int, device: str) -> torch.Tensor:
+        """
+        Samples trajectories from pure noise using the reverse diffusion process
+
+        Parameters:
+            batch_size: number of trajectories to generate
+            horizon: length of each trajectory
+            device: device for pytorch tensors
+
+        Returns:
+            x: Generated trajectories of shape [batch_size x horizon x traj_dim]
+        """
+        # Start from pure noise
+        x = torch.randn((batch_size, horizon, self.unet_args.traj_dim), device=device)
+
+        # Iteratively denoise the samples
+        for t in reversed(range(0, self.n_timesteps)):
+            time_t = torch.ones(batch_size, device=device).long() * t
+
+            # Get model prediction (either epsilon or x_0)
+            model_output = self.model(x, time_t)
+
+            alpha_t = self.alpha_bar[t]
+            alpha_t_prev = self.alpha_bar[t - 1] if t > 0 else torch.tensor(1.0)
+
+            if self.predict_epsilon:
+                # If model predicts noise, use it to compute x_0
+                pred_epsilon = model_output
+                pred_x_0 = (x - torch.sqrt(1 - alpha_t) * pred_epsilon) / torch.sqrt(alpha_t)
+            else:
+                # Model directly predicts x_0
+                pred_x_0 = model_output
+
+            # Compute posterior mean
+            beta_t = 1 - alpha_t / alpha_t_prev
+            posterior_mean = (
+                torch.sqrt(alpha_t_prev) * beta_t * pred_x_0 +
+                torch.sqrt(alpha_t) * (1 - beta_t) * x
+            ) / (1 - beta_t)
+
+            # Use pre-computed log variance for numerical stability
+            posterior_log_var_t = self.posterior_log_variance_clipped[t]
+
+            # Add noise if not the final step
+            if t > 0:
+                noise = torch.randn_like(x)
+                # exp(0.5 * log_var) = sqrt(var)
+                x = posterior_mean + torch.exp(0.5 * posterior_log_var_t) * noise
+            else:
+                x = posterior_mean
+
+        return x
