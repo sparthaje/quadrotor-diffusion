@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 
-from quadrotor_diffusion.utils.schedulers import cosine_beta_schedule
+from quadrotor_diffusion.utils.nn.schedulers import cosine_beta_schedule
 from quadrotor_diffusion.models.losses import MSELoss
 from quadrotor_diffusion.models.temporal import Unet1D
-from quadrotor_diffusion.utils.args import Unet1DArgs, DiffusionWrapperArgs
+from quadrotor_diffusion.utils.nn.args import Unet1DArgs, DiffusionWrapperArgs
+from quadrotor_diffusion.utils.logging import iprint as print
 
 
 class DiffusionWrapper(nn.Module):
@@ -41,7 +42,10 @@ class DiffusionWrapper(nn.Module):
         else:
             raise NotImplementedError(f"{loss} loss module is not supported")
 
-    def compute_loss(self, x_0):
+        num_params = sum(p.numel() for p in self.parameters()) / 1e6
+        print(f"{num_params:.2f} million parameters")
+
+    def compute_loss(self, x_0) -> torch.Tensor:
         """
         Does a forward pass and computes the loss
 
@@ -71,23 +75,3 @@ class DiffusionWrapper(nn.Module):
         loss = self.loss(model_output, target)
 
         return loss
-
-    def save(self, filepath):
-        torch.save(
-            {
-                'torch_params': self.state_dict(),
-                'diffusion_args': self.diffusion_args,
-                'unet_args': self.unet_args,
-            }, filepath
-        )
-
-    @staticmethod
-    def load(filepath):
-        state_dict = torch.load(filepath)
-        diffusion_args = state_dict['diffusion_args']
-        unet_args = state_dict['unet_args']
-
-        model = DiffusionWrapper(diffusion_args, unet_args)
-        model.load_state_dict(state_dict['model_state_dict'])
-
-        return model

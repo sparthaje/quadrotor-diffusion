@@ -18,7 +18,7 @@ class MSELoss(nn.Module):
         Returns:
         - Loss
         """
-        return F.mse_loss(pred, targ, reduction='none')
+        return F.mse_loss(pred, targ, reduction='mean')
 
 
 class TrackabilityLoss(nn.Module):

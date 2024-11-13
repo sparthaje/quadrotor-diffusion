@@ -3,8 +3,6 @@ import numpy as np
 from collections import deque
 from enum import Enum
 
-from rich import print
-
 INITIAL_GATE_EXIT = np.array([0, 1, 0])
 
 

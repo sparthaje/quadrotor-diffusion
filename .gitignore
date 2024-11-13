@@ -1,6 +1,9 @@
 # Firmware for simulator
 pycffirmware
 
+############# OUTPUTS #############
+logs/*
+
 ############### DATA ###############
 unconditioned/data/*
 data/

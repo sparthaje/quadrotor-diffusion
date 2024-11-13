@@ -9,7 +9,8 @@ from quadrotor_diffusion.models.nn_blocks import (
     Downsample1d,
     Upsample1d
 )
-from quadrotor_diffusion.utils.args import Unet1DArgs
+from quadrotor_diffusion.utils.nn.args import Unet1DArgs
+from quadrotor_diffusion.utils.logging import iprint as print
 
 
 class ResNet1DBlock(nn.Module):
@@ -28,7 +29,7 @@ class ResNet1DBlock(nn.Module):
         self.time_mlp = nn.Sequential(
             nn.Mish(),
             nn.Linear(t_embed_dim, c_out),
-            Rearrange("batch t -> batch 1 t"),
+            Rearrange("batch t -> batch t 1"),
         )
 
         # Transform input embeddings into output embeddings feature before adding residual connection
@@ -57,6 +58,8 @@ class Unet1D(nn.Module):
         Down samples (factor of two) the horizon while scaling the feature dimension
         Up samples (factor of two) the horizon while dividing the feature dimension
         """
+        super().__init__()
+
         traj_dim = args.traj_dim
         features = args.features
         channel_mults = args.channel_mults
@@ -93,16 +96,16 @@ class Unet1D(nn.Module):
             c_out = dims[idx + 1]
             self.downs.append(nn.ModuleList([
                 ResNet1DBlock(c_in, c_out, t_embed_dim=features),
-                ResNet1DBlock(c_in, c_out, t_embed_dim=features),
-                Downsample1d(c_out) if c_out == dims[-1] else nn.Identity()
+                ResNet1DBlock(c_out, c_out, t_embed_dim=features),
+                Downsample1d(c_out) if c_out != dims[-1] else nn.Identity()
             ]))
 
         # Middle layers to transform mid features
         c_mid = dims[-1]
-        self.middle = nn.Sequential(
+        self.middle = nn.ModuleList([
             ResNet1DBlock(c_mid, c_mid, t_embed_dim=features),
             ResNet1DBlock(c_mid, c_mid, t_embed_dim=features)
-        )
+        ])
 
         # Up layers which scales horizon up by factors of 2^(len(channels_mult))
         self.ups = nn.ModuleList([])
@@ -139,11 +142,12 @@ class Unet1D(nn.Module):
             skip_connections.append(x)
             x = downsample(x)
 
-        x = self.middle(x)
+        for resnet in self.middle:
+            x = resnet(x, t)
 
         for resnet0, resnet1, upsample in self.ups:
             skip_connection = skip_connections.pop()
-            x = torch.cat(x, skip_connection, dim=1)
+            x = torch.cat((x, skip_connection), dim=1)
             x = resnet0(x, t)
             x = resnet1(x, t)
             x = upsample(x)

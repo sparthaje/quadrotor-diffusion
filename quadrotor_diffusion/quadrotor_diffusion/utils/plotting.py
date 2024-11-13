@@ -1,6 +1,8 @@
+import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
+import os
 
 
 def plot_reference_time_series(save_path: str, title: str, reference, sim_states=None):
@@ -43,7 +45,7 @@ def plot_reference_time_series(save_path: str, title: str, reference, sim_states
 
     plt.tight_layout()
 
-    fig.savefig(save_path, format='svg', bbox_inches='tight')
+    fig.savefig(save_path, format='pdf', bbox_inches='tight')
     plt.close(fig)
 
     return save_path
@@ -107,7 +109,37 @@ def view_trajectories_in_3d(save_path: str, title: str, reference, sim_states=No
 
     plt.tight_layout()
 
-    fig.savefig(save_path, format='svg', bbox_inches='tight')
+    fig.savefig(save_path, format='pdf', bbox_inches='tight')
     plt.close(fig)
 
     return save_path
+
+
+def plot_loss_and_time(csv_file):
+    # Read CSV file into a DataFrame
+    df = pd.read_csv(csv_file)
+
+    # Get the directory of the CSV file
+    dir_path = os.path.dirname(os.path.abspath(csv_file))
+
+    # Plot Loss vs Epoch (Line Plot)
+    plt.figure(figsize=(10, 5))
+    plt.plot(df['epoch'], df['loss'], label='Loss', color='blue')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Loss vs Epoch')
+    plt.grid(True)
+    plt.legend()
+    loss_file_path = os.path.join(dir_path, 'loss.pdf')
+    plt.savefig(loss_file_path)  # Save the plot as a PDF
+    plt.close()  # Close the plot to avoid overlap
+
+    # Plot Histogram of Time
+    plt.figure(figsize=(10, 5))
+    plt.hist(df['time'], bins=20, color='green', edgecolor='black')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Frequency')
+    plt.title('Histogram of Time Passed')
+    time_file_path = os.path.join(dir_path, 'time.pdf')
+    plt.savefig(time_file_path)  # Save the plot as a PDF
+    plt.close()  # Close the plot to avoid overlap
