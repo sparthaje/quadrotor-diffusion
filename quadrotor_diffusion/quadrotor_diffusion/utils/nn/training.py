@@ -11,7 +11,6 @@ import tqdm
 
 import quadrotor_diffusion.utils.nn.ema as ema
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
-from quadrotor_diffusion.models.diffusion import DiffusionWrapper
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.logging import (
     dataclass_to_table,
@@ -23,15 +22,27 @@ class Trainer:
     def __init__(
         self,
         args: TrainerArgs,
-        model: DiffusionWrapper,
+        model: nn.Module,
         dataset: Dataset,
     ):
+        """"
+        Generalized trainer for any nn.Module that takes a list of dataclasses as arguments for initialization
+
+        Parameters:
+        - args: training hyperparameters
+        - model: nn.Module that takes a Tuple[dataclass] for initialization and has property .args
+        - dataset: dataset that has a .normalizer property which returns a normalizer
+        """
+
         self.args = args
         if args.num_gpus == -1:
             args.num_gpus = torch.cuda.device_count()
 
-        if args.num_gpus > 1:
+        self.multi_gpu = args.num_gpus > 1
+        if self.multi_gpu:
             self.model = nn.DataParallel(model)
+            # TODO(shreepa): Fix this
+            raise NotImplementedError("There is some problem where multiple gpus isn't working")
         else:
             self.model = model
 
@@ -49,12 +60,12 @@ class Trainer:
     def test_forward_pass(self):
         start = time.time()
         first_item: torch.Tensor = next(iter(self.train_data_loader)).to(self.args.device)
-        if isinstance(self.model, nn.DataParallel):
+        if self.multi_gpu:
             self.model.module.compute_loss(first_item)
         else:
             self.model.compute_loss(first_item)
         duration = time.time() - start
-        print(f"Forward pass succeeded in {duration:.2f}")
+        print(f"Forward pass succeeded in {duration:.2f}s")
 
     def train(self):
         epoch = 0
@@ -62,7 +73,7 @@ class Trainer:
             epoch_loss = 0.0
 
             start = time.time()
-            for batch in tqdm.tqdm(self.train_data_loader, desc=f"Epoch {epoch+1}"):
+            for batch in tqdm.tqdm(self.train_data_loader, desc=f"[ training ] Epoch {epoch+1}"):
                 batch = batch.to(self.args.device)
                 self.batches_seen += 1
 
@@ -82,7 +93,7 @@ class Trainer:
                 if self.ema_model is not None and self.batches_seen % self.args.num_batches_per_ema == 0:
                     ema.update_model_average(
                         self.ema_model,
-                        self.model.module if isinstance(self.model, nn.DataParallel) else self.model,
+                        self.model.module if self.multi_gpu else self.model,
                         self.args.ema_decay
                     )
 
@@ -112,8 +123,11 @@ class Trainer:
 
         new_dir_name = f"{max_num + 1}.{date_str}"
         new_dir_path = os.path.join(self.args.log_dir, new_dir_name)
-
         os.makedirs(new_dir_path)
+
+        epoch_path = os.path.join(new_dir_path, "checkpoints")
+        os.makedirs(epoch_path)
+
         print(f"Save directory created: {new_dir_path}")
         self.args.log_dir = new_dir_path
 
@@ -125,35 +139,42 @@ class Trainer:
 
         with open(os.path.join(self.args.log_dir, "overview.txt"), "w") as f:
             f.write(dataclass_to_table(self.args) + "\n")
-            f.write(dataclass_to_table(self.model.module.diffusion_args if isinstance(
-                self.model, nn.DataParallel) else self.model.diffusion_args) + "\n")
-            f.write(dataclass_to_table(self.model.module.unet_args if isinstance(
-                self.model, nn.DataParallel) else self.model.unet_args) + "\n")
+            f.write(str(self.model.module) if self.multi_gpu else str(self.model))
             f.write(f"\nDataset: {type(self.train_data_loader.dataset)}\n")
             f.write(f"Normalization: {self.train_data_loader.dataset.normalizer}\n\n")
 
     def save(self, epoch: int, loss: float):
-        filename = os.path.join(self.args.log_dir, f"epoch_{epoch}_loss_{loss:.4f}")
+        filename = os.path.join(self.args.log_dir, f"checkpoints/epoch_{epoch}_loss_{loss:.4f}")
         torch.save(
             {
-                "model_state": self.model.module.state_dict() if isinstance(self.model, nn.DataParallel) else self.model.state_dict(),
+                "model_type": type(self.model.module) if self.multi_gpu else type(self.model),
+                "model_state": self.model.module.state_dict() if self.multi_gpu else self.model.state_dict(),
                 "ema_model_state": self.ema_model.state_dict() if self.ema_model is not None else dict(),
-                "normalizer": self.normalizer,
-                "diffusion_args": self.model.module.diffusion_args if isinstance(self.model, nn.DataParallel) else self.model.diffusion_args,
-                "unet_args": self.model.module.unet_args if isinstance(self.model, nn.DataParallel) else self.model.unet_args,
+                "normalizer": self.train_data_loader.dataset.normalizer,
+                "args": self.model.module.args if self.multi_gpu else self.model.args,
                 "trainer_args": self.args,
             }, filename
         )
         print(f"Saved to {filename}")
 
     @staticmethod
-    def load(filepath) -> Tuple[DiffusionWrapper, DiffusionWrapper, Normalizer, TrainerArgs]:
-        state_dict = torch.load(filepath)
+    def load(filepath) -> Tuple[nn.Module, nn.Module, Normalizer, TrainerArgs]:
+        """
+        Loads from a checkpoint
 
-        model = DiffusionWrapper(state_dict["diffusion_args"], state_dict["unet_args"])
+        Returns:
+        - model: The model that was optimized
+        - ema: A exponential moving average of the model during training
+        - nomralizer: Normalizer used in training for the dataset
+        - trainer_args: Args used for training
+        """
+        state_dict = torch.load(filepath)
+        model_type: nn.Module = state_dict["model_type"]
+
+        model = model_type(state_dict["args"])
         model.load_state_dict(state_dict["model_state"])
 
-        ema_model = DiffusionWrapper(state_dict["diffusion_args"], state_dict["unet_args"])
+        ema_model = model_type(state_dict["args"])
         ema_model.load_state_dict(state_dict["ema_model_state"])
 
         return (

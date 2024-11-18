@@ -1,8 +1,10 @@
+import os
+from typing import Union
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
-import os
 
 
 def plot_reference_time_series(save_path: str, title: str, reference, sim_states=None):
@@ -143,3 +145,126 @@ def plot_loss_and_time(csv_file):
     time_file_path = os.path.join(dir_path, 'time.pdf')
     plt.savefig(time_file_path)  # Save the plot as a PDF
     plt.close()  # Close the plot to avoid overlap
+
+
+def pcd_plot(trajectory: np.ndarray, file_path: str):
+    """
+    Plot a trajectory (set of points) to view in 3D
+
+    Parameters:
+    - trajectory: [n x 3]
+    - file_path: export to either .xyz or .pcd
+    """
+
+    if file_path.endswith(".xyz"):
+        np.savetxt(file_path, trajectory, fmt="%.6f")
+
+    elif file_path.endswith(".pcd"):
+        raise NotImplementedError("Haven't added PCD support yet")
+
+    else:
+        raise ValueError("Not supporting this file type")
+
+
+def plot_states(
+    pos: np.ndarray,
+    vel: np.ndarray,
+    acc: np.ndarray,
+    plot_title: Union[str, None],
+    filename: str,
+):
+    """
+    Plot all dimensions of trajectory in 3x3 figure
+
+    Parameters:
+    - pos: [n x 3]
+    - vel: [n x 3]
+    - acc: [n x 3]
+    - plot_title: str
+    - filename: str
+    """
+
+    # Labels for the rows and columns
+    labels = ['Position', 'Velocity', 'Acceleration']
+    dimensions = ['X', 'Y', 'Z']
+
+    # Create a 3x3 grid of subplots
+    fig, axes = plt.subplots(3, 3, figsize=(12, 12))
+    if plot_title is not None:
+        fig.suptitle('plot_title', fontsize=16)
+
+    for i in range(3):  # Rows: Position, Velocity, Acceleration
+        for j in range(3):  # Columns: X, Y, Z dimensions
+            ax = axes[i, j]
+            if i == 0:
+                data = pos[:, j]
+            elif i == 1:
+                data = vel[:, j]
+            else:
+                data = acc[:, j]
+
+            # Plot with line and markers
+            ax.plot(data, marker='.', linestyle='-', label=f'{dimensions[j]}')
+            ax.set_title(f'{labels[i]} - {dimensions[j]}')
+            ax.grid(True)
+            ax.legend()
+
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(filename)
+
+
+def plot_ref_obs_states(
+    ref_pos: np.ndarray,
+    ref_vel: np.ndarray,
+    ref_acc: np.ndarray,
+    obs_pos: np.ndarray,
+    obs_vel: np.ndarray,
+    obs_acc: np.ndarray,
+    plot_title: Union[str, None],
+    filename: str,
+):
+    """
+    Plot all dimensions of trajectory in 3x3 figure with reference and observed data.
+
+    Parameters:
+    - ref_pos: [n x 3] Reference positions
+    - ref_vel: [n x 3] Reference velocities
+    - ref_acc: [n x 3] Reference accelerations
+    - obs_pos: [n x 3] Observed positions
+    - obs_vel: [n x 3] Observed velocities
+    - obs_acc: [n x 3] Observed accelerations
+    - plot_title: str, Title of the plot
+    - filename: str, Path to save the plot
+    """
+
+    # Labels for the rows and columns
+    labels = ['Position', 'Velocity', 'Acceleration']
+    dimensions = ['X', 'Y', 'Z']
+
+    # Create a 3x3 grid of subplots
+    fig, axes = plt.subplots(3, 3, figsize=(12, 12))
+    if plot_title is not None:
+        fig.suptitle(plot_title, fontsize=16)
+
+    for i in range(3):  # Rows: Position, Velocity, Acceleration
+        for j in range(3):  # Columns: X, Y, Z dimensions
+            ax = axes[i, j]
+            if i == 0:
+                ref_data, obs_data = ref_pos[:, j], obs_pos[:, j]
+            elif i == 1:
+                ref_data, obs_data = ref_vel[:, j], obs_vel[:, j]
+            else:
+                ref_data, obs_data = ref_acc[:, j], obs_acc[:, j]
+
+            # Plot reference and observed data
+            ax.plot(ref_data, marker='.', linestyle='-', label=f'Ref {dimensions[j]}', alpha=0.7)
+            ax.plot(obs_data, marker='.', linestyle='--', label=f'Obs {dimensions[j]}', alpha=0.7)
+
+            ax.set_title(f'{labels[i]} - {dimensions[j]}')
+            ax.grid(True)
+            ax.legend()
+
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(filename)

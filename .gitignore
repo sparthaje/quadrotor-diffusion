@@ -3,6 +3,7 @@ pycffirmware
 
 ############# OUTPUTS #############
 logs/*
+logs
 
 ############### DATA ###############
 unconditioned/data/*

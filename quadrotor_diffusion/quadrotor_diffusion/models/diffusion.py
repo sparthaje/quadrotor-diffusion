@@ -1,4 +1,5 @@
 import warnings
+from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -7,7 +8,7 @@ from quadrotor_diffusion.utils.nn.schedulers import cosine_beta_schedule
 from quadrotor_diffusion.models.losses import MSELoss
 from quadrotor_diffusion.models.temporal import Unet1D
 from quadrotor_diffusion.utils.nn.args import Unet1DArgs, DiffusionWrapperArgs
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.logging import dataclass_to_table, iprint as print
 
 # TODO(shreepa): Probably should fix this at some point
 # Suppress FutureWarning for this specific issue
@@ -17,13 +18,19 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*torch.load.
 class DiffusionWrapper(nn.Module):
     def __init__(
         self,
-        diffusion_args: DiffusionWrapperArgs,
-        unet_args: Unet1DArgs
+        args: Tuple[DiffusionWrapperArgs, Unet1DArgs],
     ):
         """
         Wrapper that noises sample and computes the loss for a denoising diffusion model
         """
         super().__init__()
+
+        diffusion_args: DiffusionWrapperArgs = args[0]
+        unet_args: Unet1DArgs = args[1]
+        assert isinstance(diffusion_args, DiffusionWrapperArgs), "diffusion_args must be of type DiffusionWrapperArgs"
+        assert isinstance(unet_args, Unet1DArgs), "unet_args must be of type Unet1DArgs"
+
+        self.args = args
         self.diffusion_args = diffusion_args
         self.unet_args = unet_args
 
@@ -112,7 +119,7 @@ class DiffusionWrapper(nn.Module):
             model_output = self.model(x, time_t)
 
             alpha_t = self.alpha_bar[t]
-            alpha_t_prev = self.alpha_bar[t - 1] if t > 0 else torch.tensor(1.0)
+            alpha_t_prev = self.alpha_bar[t - 1] if t > 0 else torch.tensor(1.0, device=device)
 
             if self.predict_epsilon:
                 # If model predicts noise, use it to compute x_0
@@ -122,22 +129,21 @@ class DiffusionWrapper(nn.Module):
                 # Model directly predicts x_0
                 pred_x_0 = model_output
 
-            # Compute posterior mean
-            beta_t = 1 - alpha_t / alpha_t_prev
+            # Compute posterior mean and variance
             posterior_mean = (
-                torch.sqrt(alpha_t_prev) * beta_t * pred_x_0 +
-                torch.sqrt(alpha_t) * (1 - beta_t) * x
-            ) / (1 - beta_t)
-
-            # Use pre-computed log variance for numerical stability
-            posterior_log_var_t = self.posterior_log_variance_clipped[t]
+                torch.sqrt(alpha_t_prev) *
+                (x - torch.sqrt(1 - alpha_t) * model_output / torch.sqrt(alpha_t))
+            ) if self.predict_epsilon else pred_x_0
 
             # Add noise if not the final step
             if t > 0:
                 noise = torch.randn_like(x)
-                # exp(0.5 * log_var) = sqrt(var)
-                x = posterior_mean + torch.exp(0.5 * posterior_log_var_t) * noise
+                posterior_variance = self.posterior_variance[t]
+                x = posterior_mean + torch.sqrt(posterior_variance) * noise
             else:
                 x = posterior_mean
 
         return x
+
+    def __str__(self):
+        return dataclass_to_table(self.diffusion_args) + "\n" + dataclass_to_table(self.unet_args) + "\n"

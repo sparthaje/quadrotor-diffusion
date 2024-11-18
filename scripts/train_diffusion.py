@@ -33,7 +33,7 @@ print(dataclass_to_table(train_args))
 print("\n" + "="*100 + "\n")
 
 
-diff_model = DiffusionWrapper(diff_args, unet_args)
+diff_model = DiffusionWrapper((diff_args, unet_args))
 trainer = Trainer(train_args, diff_model, dataset)
 
 trainer.test_forward_pass()

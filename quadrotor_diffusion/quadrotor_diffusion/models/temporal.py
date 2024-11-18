@@ -9,6 +9,11 @@ from quadrotor_diffusion.models.nn_blocks import (
     Downsample1d,
     Upsample1d
 )
+from quadrotor_diffusion.models.attention import (
+    LinearAttention,
+    PreNorm,
+    Residual
+)
 from quadrotor_diffusion.utils.nn.args import Unet1DArgs
 from quadrotor_diffusion.utils.logging import iprint as print
 
@@ -72,11 +77,6 @@ class Unet1D(nn.Module):
             len(attentions[2]) == len(channel_mults) - 1, \
             "Attentions must have 3 subarrays for down scale, mid, upscale with appropriate number of bools"
 
-        for x in attentions:
-            for y in x:
-                if y:
-                    raise NotImplementedError("Attention module hasn't been implemented yet")
-
         # Projects sinusoidal embeddings into number of features
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(features),
@@ -90,13 +90,14 @@ class Unet1D(nn.Module):
 
         # Down layers which cut horizon down by factors of 2^(len(channels_mult) - 1)
         self.downs = nn.ModuleList([])
-        for idx, c_in in enumerate(dims):
+        for idx, (c_in, attention) in enumerate(zip(dims, attentions[0])):
             if idx >= len(dims) - 1:
                 break
             c_out = dims[idx + 1]
             self.downs.append(nn.ModuleList([
                 ResNet1DBlock(c_in, c_out, t_embed_dim=features),
                 ResNet1DBlock(c_out, c_out, t_embed_dim=features),
+                Residual(PreNorm(c_out, LinearAttention(c_out))) if attention else nn.Identity(),
                 Downsample1d(c_out) if c_out != dims[-1] else nn.Identity()
             ]))
 
@@ -104,13 +105,14 @@ class Unet1D(nn.Module):
         c_mid = dims[-1]
         self.middle = nn.ModuleList([
             ResNet1DBlock(c_mid, c_mid, t_embed_dim=features),
+            Residual(PreNorm(c_mid, LinearAttention(c_mid))) if attentions[1][0] else nn.Identity(),
             ResNet1DBlock(c_mid, c_mid, t_embed_dim=features)
         ])
 
         # Up layers which scales horizon up by factors of 2^(len(channels_mult))
         self.ups = nn.ModuleList([])
         dims_up = list(reversed(dims[1:]))
-        for idx, c_out in enumerate(dims_up):
+        for idx, (c_out, attention) in enumerate(zip(dims_up, attentions[2])):
             if idx >= len(dims_up) - 1:
                 break
             c_in = dims_up[idx + 1]
@@ -118,6 +120,7 @@ class Unet1D(nn.Module):
                 # Multiply c_out by two because we add the features of the same dimension from the left of UNET
                 ResNet1DBlock(2 * c_out, c_in, t_embed_dim=features),
                 ResNet1DBlock(c_in, c_in, t_embed_dim=features),
+                Residual(PreNorm(c_in, LinearAttention(c_in))) if attention else nn.Identity(),
                 Upsample1d(c_in)
             ]))
 
@@ -136,20 +139,24 @@ class Unet1D(nn.Module):
         t = self.time_mlp(t)
 
         skip_connections = []
-        for resnet0, resnet1, downsample in self.downs:
+        for resnet0, resnet1, attention, downsample in self.downs:
             x = resnet0(x, t)
             x = resnet1(x, t)
+            x = attention(x)
             skip_connections.append(x)
             x = downsample(x)
 
-        for resnet in self.middle:
-            x = resnet(x, t)
+        resnet0, attention, resnet1 = self.middle
+        x = resnet0(x, t)
+        x = attention(x)
+        x = resnet1(x, t)
 
-        for resnet0, resnet1, upsample in self.ups:
+        for resnet0, resnet1, attention, upsample in self.ups:
             skip_connection = skip_connections.pop()
             x = torch.cat((x, skip_connection), dim=1)
             x = resnet0(x, t)
             x = resnet1(x, t)
+            x = attention(x)
             x = upsample(x)
 
         x = self.final_conv(x)
