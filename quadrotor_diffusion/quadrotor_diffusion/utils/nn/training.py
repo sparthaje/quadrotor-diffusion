@@ -57,28 +57,32 @@ class Trainer:
         self.normalizer: Normalizer = dataset.normalizer
         self.create_log_dir()
 
+    @torch.no_grad()
     def test_forward_pass(self):
         start = time.time()
         first_item: torch.Tensor = next(iter(self.train_data_loader)).to(self.args.device)
         if self.multi_gpu:
-            self.model.module.compute_loss(first_item)
+            loss = self.model.module.compute_loss(first_item)
         else:
-            self.model.compute_loss(first_item)
+            loss = self.model.compute_loss(first_item)
         duration = time.time() - start
         print(f"Forward pass succeeded in {duration:.2f}s")
+        return loss
 
     def train(self):
         epoch = 0
         while self.args.max_epochs is None or epoch < self.args.max_epochs:
-            epoch_loss = 0.0
+            epoch_losses = {}
 
             start = time.time()
             for batch in tqdm.tqdm(self.train_data_loader, desc=f"[ training ] Epoch {epoch+1}"):
                 batch = batch.to(self.args.device)
                 self.batches_seen += 1
 
-                loss = self.model.module.compute_loss(batch) if isinstance(
+                loss_dict = self.model.module.compute_loss(batch) if isinstance(
                     self.model, nn.DataParallel) else self.model.compute_loss(batch)
+
+                loss = loss_dict["loss"]
                 loss /= self.args.batches_per_backward
                 loss.backward()
 
@@ -97,18 +101,30 @@ class Trainer:
                         self.args.ema_decay
                     )
 
-                loss = loss.detach().cpu().numpy()
-                loss *= self.args.batches_per_backward
-                epoch_loss += loss
+                detached_losses = {k: v.detach().cpu().item() for k, v in loss_dict.items()}
+                detached_losses["loss"] *= self.args.batches_per_backward
+                for k, v in detached_losses.items():
+                    if k not in epoch_losses:
+                        epoch_losses[k] = 0.0
+                    epoch_losses[k] += v
 
-            epoch_loss /= len(self.train_data_loader.dataset)
+            epoch_losses = {k: v / len(self.train_data_loader.dataset)
+                            for k, v in epoch_losses.items()}
             if (epoch + 1) % self.args.save_freq == 0:
-                self.save(epoch, epoch_loss)
+                self.save(epoch, epoch_losses["loss"])
 
-            log_stmnt = f"Epoch {epoch + 1}: Avg Loss per Sample {epoch_loss:.1e} {time.time() - start:.2f}s"
+            log_stmnt = f"Epoch {epoch + 1}: Avg Loss per Sample {epoch_losses['loss']:.1e} {time.time() - start:.2f}s"
             print(log_stmnt, "\n")
 
-            log_stmnt = f"{epoch},{epoch_loss},{time.time() - start:.2f}"
+            log_parts = [
+                str(epoch),
+                f"{time.time() - start:.2f}"
+            ]
+
+            loss_components = sorted(epoch_losses.keys())
+            log_parts.extend([f"{epoch_losses[k]}" for k in loss_components])
+
+            log_stmnt = ",".join(log_parts)
             with open(os.path.join(self.args.log_dir, "logs.csv"), "a") as f:
                 f.write(log_stmnt + "\n")
 
@@ -121,7 +137,9 @@ class Trainer:
         dirs = [d for d in os.listdir(self.args.log_dir) if os.path.isdir(os.path.join(self.args.log_dir, d))]
         max_num = max([int(d.split('.')[0]) for d in dirs if d.split('.')[0].isdigit()], default=0)
 
-        new_dir_name = f"{max_num + 1}.{date_str}"
+        model_type: str = str(type(self.model.module) if type(self.model) == nn.DataParallel else type(self.model))
+        model_type = model_type.split('.')[-1][:-2]
+        new_dir_name = f"{max_num + 1}.{model_type}.{date_str}"
         new_dir_path = os.path.join(self.args.log_dir, new_dir_name)
         os.makedirs(new_dir_path)
 
@@ -131,15 +149,20 @@ class Trainer:
         print(f"Save directory created: {new_dir_path}")
         self.args.log_dir = new_dir_path
 
+        losses = self.test_forward_pass()
+        loss_components = sorted(losses.keys())
         with open(os.path.join(self.args.log_dir, "logs.csv"), "w") as f:
-            f.write("epoch,loss,time\n")
+            f.write("epoch,time," + ','.join(loss_components) + "\n")
 
         print(f"Dataset: {type(self.train_data_loader.dataset)}")
-        print(f"Normalization: {self.train_data_loader.dataset.normalizer}\n")
+        print(f"Normalization: {self.train_data_loader.dataset.normalizer}")
+
+        def args_to_str(model):
+            return "\n".join([dataclass_to_table(arg) for arg in model.args])
 
         with open(os.path.join(self.args.log_dir, "overview.txt"), "w") as f:
             f.write(dataclass_to_table(self.args) + "\n")
-            f.write(str(self.model.module) if self.multi_gpu else str(self.model))
+            f.write(args_to_str(self.model.module) if self.multi_gpu else args_to_str(self.model))
             f.write(f"\nDataset: {type(self.train_data_loader.dataset)}\n")
             f.write(f"Normalization: {self.train_data_loader.dataset.normalizer}\n\n")
 

@@ -1,5 +1,5 @@
 import os
-from typing import Union
+from typing import Union, List
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -117,16 +117,16 @@ def view_trajectories_in_3d(save_path: str, title: str, reference, sim_states=No
     return save_path
 
 
-def plot_loss_and_time(csv_file):
+def plot_loss_and_time(csv_file: str, losses: List[str]):
     # Read CSV file into a DataFrame
     df = pd.read_csv(csv_file)
 
     # Get the directory of the CSV file
     dir_path = os.path.dirname(os.path.abspath(csv_file))
 
-    # Plot Loss vs Epoch (Line Plot)
     plt.figure(figsize=(10, 5))
-    plt.plot(df['epoch'], df['loss'], label='Loss', color='blue')
+    for col in losses:
+        plt.plot(df['epoch'], df[col], label=col)
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Loss vs Epoch')
@@ -258,8 +258,10 @@ def plot_ref_obs_states(
                 ref_data, obs_data = ref_acc[:, j], obs_acc[:, j]
 
             # Plot reference and observed data
-            ax.plot(ref_data, marker='.', linestyle='-', label=f'Ref {dimensions[j]}', alpha=0.7)
-            ax.plot(obs_data, marker='.', linestyle='--', label=f'Obs {dimensions[j]}', alpha=0.7)
+            ax.plot(ref_data, marker='.', linestyle='-',
+                    label=f'Ref {dimensions[j]}', alpha=0.7, linewidth=1, markersize=4)
+            ax.plot(obs_data, marker='.', linestyle='--',
+                    label=f'Obs {dimensions[j]}', alpha=0.7, linewidth=1, markersize=4)
 
             ax.set_title(f'{labels[i]} - {dimensions[j]}')
             ax.grid(True)

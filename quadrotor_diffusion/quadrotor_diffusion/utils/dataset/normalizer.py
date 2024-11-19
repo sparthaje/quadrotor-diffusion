@@ -46,3 +46,25 @@ class GuassianNormalizer(Normalizer):
 
     def __str__(self):
         return f"GuassianNormalizer: µ = {self.mean}, s = {self.variance}"
+
+
+class MinMaxNormalizer(Normalizer):
+    def __init__(self, mins: np.array, maxes: np.array):
+        """
+        Normalizes between min and max so all data is [0, 1]
+        NOTE: no clipping, so if a value exceeds min/max it can have value > 1
+        mins / maxes: n item arrays for each dimension of the data
+        """
+        self.mins = mins
+        self.maxes = maxes
+
+    def __call__(self, array: np.array) -> np.array:
+        normalized_array = (array - self.mins) / (self.maxes - self.mins)
+        return normalized_array
+
+    def undo(self, normalized_array: np.array) -> np.array:
+        original_array = (self.maxes - self.mins) * normalized_array + self.mins
+        return original_array
+
+    def __str__(self):
+        return f"MinMaxNormalizer: min={self.mins}\tmaxes={self.maxes}"

@@ -1,6 +1,8 @@
 # Firmware for simulator
 pycffirmware
 
+.vscode
+
 ############# OUTPUTS #############
 logs/*
 logs

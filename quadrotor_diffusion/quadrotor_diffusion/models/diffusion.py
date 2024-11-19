@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 
 from quadrotor_diffusion.utils.nn.schedulers import cosine_beta_schedule
-from quadrotor_diffusion.models.losses import MSELoss
+from quadrotor_diffusion.models.losses import MSELoss, L1Loss
 from quadrotor_diffusion.models.temporal import Unet1D
 from quadrotor_diffusion.utils.nn.args import Unet1DArgs, DiffusionWrapperArgs
 from quadrotor_diffusion.utils.logging import dataclass_to_table, iprint as print
@@ -58,6 +58,8 @@ class DiffusionWrapper(nn.Module):
 
         if loss == "MSELoss":
             self.loss = MSELoss()
+        elif loss == "L1Loss":
+            self.loss = L1Loss()
         else:
             raise NotImplementedError(f"{loss} loss module is not supported")
 
@@ -144,6 +146,3 @@ class DiffusionWrapper(nn.Module):
                 x = posterior_mean
 
         return x
-
-    def __str__(self):
-        return dataclass_to_table(self.diffusion_args) + "\n" + dataclass_to_table(self.unet_args) + "\n"

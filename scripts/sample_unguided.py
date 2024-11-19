@@ -4,13 +4,16 @@ import sys
 import argparse
 import time
 
+import numpy as np
+
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.models.diffusion import DiffusionWrapper
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
 from quadrotor_diffusion.utils.logging import iprint as print
-from quadrotor_diffusion.utils.plotting import plot_states, pcd_plot
-from quadrotor_diffusion.utils.trajectory import derive_target_velocities, derive_target_accelerations
+from quadrotor_diffusion.utils.plotting import plot_states, pcd_plot, plot_ref_obs_states
+from quadrotor_diffusion.utils.trajectory import derive_trajectory, integrate_trajectory
+from quadrotor_diffusion.utils.simulator import play_trajectory
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-e', '--experiment', type=int, help='Experiment number', required=True)
@@ -91,6 +94,7 @@ trainer_args: TrainerArgs = None
 diff, ema, normalizer, trainer_args = Trainer.load(checkpoint_file)
 print(f"Loaded {checkpoint_file}")
 model = diff if args.no_ema else ema
+print(f"Using {normalizer}")
 
 model.to(args.device)
 start = time.time()
@@ -99,16 +103,28 @@ print(f"{time.time() - start:.2f} seconds to generate {args.samples} samples wit
 
 for i in range(trajectories.size(0)):  # Loop through batch_size
     sampled = trajectories[i].cpu().numpy()
-    traj = normalizer.undo(sampled)
-    traj = traj[:, :3]
+    acc = normalizer.undo(sampled)
+    acc = acc[:, :3]
 
-    vels = derive_target_velocities(traj, 30)
-    acc = derive_target_accelerations(vels, 30)
+    vels = integrate_trajectory(acc, 30)
+    pos = integrate_trajectory(vels, 30, initial_conditions=np.array([0., 0., 0.3]))
+
     plot_states(
-        traj, vels, acc,
+        pos, vels, acc,
         f"Sample {i} / {trajectories.size(0)}",
         os.path.join(exp_dir, f"traj_{i}.pdf")
     )
     pcd_plot(
-        traj, os.path.join(exp_dir, f"traj_{i}.xyz")
+        pos, os.path.join(exp_dir, f"traj_{i}.xyz")
+    )
+
+    worked, states = play_trajectory(pos)
+    if not worked:
+        print("Failed")
+
+    plot_ref_obs_states(
+        pos, vels, acc,
+        states, derive_trajectory(states, 30), derive_trajectory(states, 30, order=3),
+        f"Sample {i} / {trajectories.size(0)}",
+        os.path.join(exp_dir, f"traj_{i}_sim.pdf")
     )

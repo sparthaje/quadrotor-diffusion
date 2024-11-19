@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 from dataclasses import dataclass
 
 
@@ -26,6 +26,44 @@ class DiffusionWrapperArgs:
     predict_epsilon: bool
     loss: str
     n_timesteps: int
+
+
+@dataclass
+class VAE_EncoderArgs:
+    """
+    traj_dim: number of items per state (i.e. xyz = 3)
+    latent_dim: latent dimensionality for vector
+    features: Base number of features to project traj_dim to
+    channel_mults: How to scale up the channels as horizon gets down scaled, e.g. [1, 2, 4, 8]
+    """
+    traj_dim: int
+    latent_dim: int
+    features: int
+    channel_mults: Tuple[int]
+
+
+@dataclass
+class VAE_DecoderArgs:
+    """
+    traj_dim: number of items per state (i.e. xyz = 3)
+    latent_dim: latent dimensionality for vector
+    features: Base number of features to project into traj_dim
+    channel_mults: How to scale down the channels as horizon gets up scaled, e.g. [8, 4, 2, 1]
+    """
+    traj_dim: int
+    latent_dim: int
+    features: int
+    channel_mults: Tuple[int]
+
+
+@dataclass
+class VAE_WrapperArgs:
+    """
+    loss: An nn.Module wrapper of a loss function (can be dynamic with learnable parameters)
+    beta: How much to weight KL divergence
+    """
+    loss: str
+    beta: float
 
 
 @dataclass

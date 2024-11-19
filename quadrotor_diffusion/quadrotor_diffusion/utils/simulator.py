@@ -8,10 +8,7 @@ import sys
 
 from safe_control_gym.utils.configuration import ConfigFactory
 from safe_control_gym.utils.registration import make
-from quadrotor_diffusion.utils.trajectory import (
-    derive_target_velocities,
-    derive_target_accelerations,
-)
+from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
 
 def play_trajectory(ref_pos: np.ndarray):
@@ -26,15 +23,15 @@ def play_trajectory(ref_pos: np.ndarray):
     sys.argv.extend(["--overrides", "quadrotor_diffusion/quadrotor_diffusion/utils/play_trajectory.yaml"])
     parser = argparse.ArgumentParser(description='Generate unconditioned diffusion data.')
     parser.add_argument('--overrides', type=str, help='Config file')
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     with open(args.overrides, 'r') as file:
         CONFIG = yaml.safe_load(file)
 
     CTRL_FREQ = CONFIG["quadrotor_config"]["ctrl_freq"]
 
-    ref_vel = derive_target_velocities(ref_pos, CTRL_FREQ)
-    ref_acc = derive_target_accelerations(ref_vel, CTRL_FREQ)
+    ref_vel = derive_trajectory(ref_pos, CTRL_FREQ)
+    ref_acc = derive_trajectory(ref_vel, CTRL_FREQ)
     reference = np.stack((ref_pos, ref_vel, ref_acc), axis=1)
 
     config = ConfigFactory().merge()

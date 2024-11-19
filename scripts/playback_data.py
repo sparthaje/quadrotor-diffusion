@@ -5,8 +5,7 @@ import numpy as np
 from quadrotor_diffusion.utils.simulator import play_trajectory
 from quadrotor_diffusion.utils.trajectory import (
     compute_tracking_error,
-    derive_target_velocities,
-    derive_target_accelerations
+    derive_trajectory
 )
 from quadrotor_diffusion.utils.plotting import (
     plot_states,
@@ -14,14 +13,14 @@ from quadrotor_diffusion.utils.plotting import (
     pcd_plot,
 )
 
-SAMPLE_NUM = 25
+SAMPLE_NUM = 29
 ref_pos = np.load(f"data/quadrotor_random/{SAMPLE_NUM}.npy")
-ref_vel = derive_target_velocities(ref_pos, 30)
-ref_acc = derive_target_accelerations(ref_vel, 30)
+ref_vel = derive_trajectory(ref_pos, 30)
+ref_acc = derive_trajectory(ref_vel, 30, order=3)
 
 worked, obs_pos = play_trajectory(ref_pos)
-obs_vel = derive_target_velocities(obs_pos, 30)
-obs_acc = derive_target_accelerations(obs_vel, 30)
+obs_vel = derive_trajectory(obs_pos, 30)
+obs_acc = derive_trajectory(obs_vel, 30, order=3)
 
 if not worked:
     print("Crashed")
