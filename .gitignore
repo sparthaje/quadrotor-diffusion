@@ -6,6 +6,7 @@ pycffirmware
 ############# OUTPUTS #############
 logs/*
 logs
+scripts/random.ipynb
 
 ############### DATA ###############
 unconditioned/data/*

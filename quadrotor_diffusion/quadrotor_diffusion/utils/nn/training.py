@@ -154,7 +154,7 @@ class Trainer:
         with open(os.path.join(self.args.log_dir, "logs.csv"), "w") as f:
             f.write("epoch,time," + ','.join(loss_components) + "\n")
 
-        print(f"Dataset: {type(self.train_data_loader.dataset)}")
+        print(f"Dataset: {str(self.train_data_loader.dataset)}")
         print(f"Normalization: {self.train_data_loader.dataset.normalizer}")
 
         def args_to_str(model):
@@ -163,7 +163,7 @@ class Trainer:
         with open(os.path.join(self.args.log_dir, "overview.txt"), "w") as f:
             f.write(dataclass_to_table(self.args) + "\n")
             f.write(args_to_str(self.model.module) if self.multi_gpu else args_to_str(self.model))
-            f.write(f"\nDataset: {type(self.train_data_loader.dataset)}\n")
+            f.write(f"\nDataset: {str(self.train_data_loader.dataset)}\n")
             f.write(f"Normalization: {self.train_data_loader.dataset.normalizer}\n\n")
 
     def save(self, epoch: int, loss: float):

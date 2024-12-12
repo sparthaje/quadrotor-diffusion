@@ -48,6 +48,21 @@ class GuassianNormalizer(Normalizer):
         return f"GuassianNormalizer: µ = {self.mean}, s = {self.variance}"
 
 
+class LinearNormalizer(Normalizer):
+    def __init__(self, scalers: np.array, biases: np.array):
+        self.scalers = scalers
+        self.biases = biases
+
+    def __call__(self, array: np.array) -> np.array:
+        return array * self.scalers + self.biases
+
+    def undo(self, scaled_array: np.array) -> np.array:
+        return scaled_array / self.scalers - self.biases
+
+    def __str__(self):
+        return f"ScalerNormalizer: scalers = {self.scalers}, biases = {self.biases}"
+
+
 class MinMaxNormalizer(Normalizer):
     def __init__(self, mins: np.array, maxes: np.array):
         """

@@ -5,7 +5,7 @@ import torch.nn as nn
 import einops
 
 from quadrotor_diffusion.utils.logging import iprint as print
-from quadrotor_diffusion.models.losses import VAE_Loss, MSELoss, L1Loss, SmoothnessLoss
+from quadrotor_diffusion.models.losses import VAE_Loss, MSELoss, L1Loss, SmoothnessLoss, SmoothWeightedL1
 from quadrotor_diffusion.utils.nn.args import VAE_EncoderArgs, VAE_DecoderArgs, VAE_WrapperArgs
 from quadrotor_diffusion.models.attention import LinearAttention, Residual, PreNorm
 from quadrotor_diffusion.models.nn_blocks import (
@@ -79,7 +79,7 @@ class Encoder1D(nn.Module):
     def forward(self, x):
         """
         x: [batch_size x horizon x traj_dim]
-        returns: mu, logvar of shape [batch_size x latent_dim x compressed_horizon]
+        returns: mu, logvar of shape [batch_size x compressed_horizon x latent_dim]
         """
         x = einops.rearrange(x, 'b h t -> b t h')
         x = self.init_conv(x)
@@ -181,10 +181,27 @@ class VAE_Wrapper(nn.Module):
             self.loss = VAE_Loss(MSELoss(), args[0].beta)
         elif args[0].loss == "L1Loss":
             self.loss = VAE_Loss(L1Loss(), args[0].beta)
-        elif args[0].loss == "L2Smooth":
-            self.loss = VAE_Loss(SmoothnessLoss(MSELoss(), 1), args[0].beta)
-        elif args[0].loss == "L1Smooth":
-            self.loss = VAE_Loss(SmoothnessLoss(L1Loss(), 1), args[0].beta)
+
+        elif args[0].loss == "Smooth":
+            recon_loss, order = args[0].loss_params
+
+            if recon_loss == "L1":
+                recon_loss = L1Loss()
+            elif recon_loss == "L2":
+                recon_loss = MSELoss()
+            else:
+                raise NotImplementedError("Loss not implemented")
+
+            self.loss = VAE_Loss(
+                SmoothnessLoss(recon_loss, order), args[0].beta
+            )
+
+        elif args[0].loss == "SmoothWeightedL1":
+            alpha, w_l, w_g = args[0].loss_params
+
+            self.loss = VAE_Loss(
+                SmoothWeightedL1(alpha, w_l, w_g), args[0].beta
+            )
         else:
             raise NotImplementedError(f"{args[0].loss} loss module is not supported")
 
@@ -215,18 +232,35 @@ class VAE_Wrapper(nn.Module):
         return loss
 
     @torch.no_grad()
-    def encode(self, x):
+    def encode(self, x: torch.Tensor, padding=0):
         """
         Encode input to latent distribution
+
+        Parameters:
+        x: Input data (batch_size, n, 3)
+        padding: Padding on time horizon
         """
+
+        if padding > 0:
+            top_row = x[:, 0:1, :].repeat(1, padding, 1)
+            bottom_row = x[:, -1:, :].repeat(1, padding, 1)
+            x = torch.cat([top_row, x, bottom_row], dim=1)
+
         return self.encoder(x)
 
     @torch.no_grad()
-    def decode(self, z):
+    def decode(self, z, padding=0):
         """
         Decode latent vectors to time series
+        Parameters:
+        z: Latent vector (batch_size, compressed_horizon, features)
+        padding: Padding on time horizon
         """
-        return self.decoder(z)
+
+        decoded = self.decoder(z)
+        if padding > 0:
+            decoded = decoded[:, padding:-padding, :]
+        return decoded
 
     @torch.no_grad()
     def sample(self, num_samples: int, horizon: int, device='cuda'):

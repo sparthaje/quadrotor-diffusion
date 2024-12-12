@@ -126,7 +126,7 @@ def plot_loss_and_time(csv_file: str, losses: List[str]):
 
     plt.figure(figsize=(10, 5))
     for col in losses:
-        plt.plot(df['epoch'], df[col], label=col)
+        plt.plot(df['epoch'], df[col], label=col, linewidth=3.5)
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.title('Loss vs Epoch')

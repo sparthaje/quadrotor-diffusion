@@ -46,7 +46,7 @@ def get_positions_from_boundary_conditions(boundaries, segment_lengths, CTRL_FRE
     return ref_pos
 
 
-def derive_trajectory(data: np.array, ctrl_freq: int, order: int = 2):
+def derive_trajectory(data: np.array, ctrl_freq: int, order: int = 1):
     """
     Calculate the derivative of trajectory data with respect to time.
     This function can be used to calculate velocities from positions,
@@ -58,7 +58,7 @@ def derive_trajectory(data: np.array, ctrl_freq: int, order: int = 2):
     - order: Order of derivatives
     """
 
-    if order == 1:
+    if order == 0:
         return data
 
     # Time step between measurements (in seconds)

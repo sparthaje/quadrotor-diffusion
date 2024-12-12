@@ -21,10 +21,12 @@ class DiffusionWrapperArgs:
     """
     predict_epsilon: Whether the model should predict epsilon or x_0 directly from x_t
     loss: An nn.Module wrapper of a loss function (can be dynamic with learnable parameters)
+    loss_params: Tuple of data to pass into lsoss initialization varies by loss
     n_timesteps: Number of diffusion timesteps
     """
     predict_epsilon: bool
     loss: str
+    loss_params: Tuple
     n_timesteps: int
 
 
@@ -60,9 +62,11 @@ class VAE_DecoderArgs:
 class VAE_WrapperArgs:
     """
     loss: An nn.Module wrapper of a loss function (can be dynamic with learnable parameters)
+    Loss Params: whatever parameters are releavant to the internal reconstruction loss
     beta: How much to weight KL divergence
     """
     loss: str
+    loss_params: Tuple
     beta: float
 
 

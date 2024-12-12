@@ -7,6 +7,10 @@
 conda create -n qdiff python=3.10
 conda activate qdiff
 
+# Install core modules
+cd quadrotor_diffusion
+pip install -e .
+
 # Install prerequisites for simulator
 conda install -c anaconda gmp
 

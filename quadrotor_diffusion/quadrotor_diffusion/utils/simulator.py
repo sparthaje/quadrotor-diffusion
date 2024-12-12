@@ -1,17 +1,18 @@
-from functools import partial
-
-import numpy as np
-import yaml
 import time
 import argparse
 import sys
+from typing import Tuple
+from functools import partial
+
+import yaml
+import numpy as np
 
 from safe_control_gym.utils.configuration import ConfigFactory
 from safe_control_gym.utils.registration import make
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
 
-def play_trajectory(ref_pos: np.ndarray):
+def play_trajectory(ref_pos: np.ndarray, ref_vel: np.ndarray = None, ref_acc: np.ndarray = None) -> Tuple[bool, np.ndarray]:
     """
     Plays a trajectory sample in simulator
 
@@ -30,8 +31,9 @@ def play_trajectory(ref_pos: np.ndarray):
 
     CTRL_FREQ = CONFIG["quadrotor_config"]["ctrl_freq"]
 
-    ref_vel = derive_trajectory(ref_pos, CTRL_FREQ)
-    ref_acc = derive_trajectory(ref_vel, CTRL_FREQ)
+    if ref_vel is None or ref_acc is None:
+        ref_vel = derive_trajectory(ref_pos, CTRL_FREQ)
+        ref_acc = derive_trajectory(ref_vel, CTRL_FREQ)
     reference = np.stack((ref_pos, ref_vel, ref_acc), axis=1)
 
     config = ConfigFactory().merge()
@@ -58,7 +60,7 @@ def play_trajectory(ref_pos: np.ndarray):
     env = firmware_wrapper.env
     action = np.zeros(4)
 
-    drone_states = [[obs[0], obs[2], obs[4]]]
+    drone_states = [[[obs[0], obs[2], obs[4]], [obs[1], obs[3], obs[5]]]]
     for step in range(reference.shape[0]):
         curr_time = step * CTRL_DT
         args = [reference[step][0], reference[step][1], reference[step][2], 0.0, np.zeros(3)]
@@ -67,11 +69,14 @@ def play_trajectory(ref_pos: np.ndarray):
         obs, reward, _, info, action = firmware_wrapper.step(curr_time, action)
 
         if step > 0:
-            drone_states.append([obs[0], obs[2], obs[4]])
+            drone_states.append([[obs[0], obs[2], obs[4]], [obs[1], obs[3], obs[5]]])
 
         if reward < 0:
             env.close()
-            return False, np.array(drone_states)
+            states = np.transpose(np.array(drone_states), (1, 0, 2))
+            return False, states
 
     env.close()
-    return True, np.array(drone_states)
+
+    states = np.transpose(np.array(drone_states), (1, 0, 2))
+    return True, states
