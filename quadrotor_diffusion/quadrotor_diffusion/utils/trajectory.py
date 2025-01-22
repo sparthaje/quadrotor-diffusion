@@ -1,9 +1,16 @@
 import numpy as np
 
-from collections import deque
-from enum import Enum
-
 INITIAL_GATE_EXIT = np.array([0, 1, 0])
+
+
+def spherical_to_cartesian(magnitude: float, theta: float, psi: float) -> np.array:
+    """
+    Converts in gym coordinates a spherical coordinate to xyz
+    """
+    x = magnitude * np.cos(psi) * np.sin(-theta)
+    y = magnitude * np.cos(psi) * np.cos(-theta)
+    z = magnitude * np.sin(psi)
+    return np.array([x, y, z])
 
 
 def compute_min_snap_segment(sigma, T):
@@ -21,12 +28,12 @@ def compute_min_snap_segment(sigma, T):
     return np.linalg.inv(M) @ sigma
 
 
-def get_positions_from_boundary_conditions(boundaries, segment_lengths, CTRL_FREQ):
-    """_summary_
+def get_positions_from_boundary_conditions(boundaries, segment_lengths, CTRL_FREQ) -> np.ndarray:
+    """Generates a nx3 set of positions to track
 
     Args:
-        boundaries (np.ndarray): np.array[][]
-        segment_length: float[]
+        boundaries: boundary condition to generate from (num_segments x dim(3) x boundary_condition(8))
+        segment_length: time to complete each segment (num_segments)
     """
     ref_pos = []
 
@@ -120,56 +127,43 @@ def compute_tracking_error(ref_pos: np.ndarray, pos: np.ndarray):
     return tracking_error
 
 
-def smooth_columns(arr, window_size=5, threshold=0.5):
-    """
-    Smooths columns in a numpy array by detecting and handling outliers.
+def has_knot(trajectory):
+    n = len(trajectory)
+    for i in range(n - 1):
+        for j in range(i + 2, n - 1):
+            if line_segments_intersect(trajectory[i], trajectory[i + 1], trajectory[j], trajectory[j + 1]):
+                return True
+    return False
 
-    Parameters:
-    arr : numpy.ndarray
-        Input array where each column will be smoothed
-    window_size : int
-        Size of the rolling window (default: 5)
-    threshold : float
-        Z-score threshold for outlier detection (default: 2)
+
+def line_segments_intersect(p1, p2, q1, q2):
+    def ccw(a, b, c):
+        return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+    return ccw(p1, q1, q2) != ccw(p2, q1, q2) and ccw(p1, p2, q1) != ccw(p1, p2, q2)
+
+
+def evaluate_vel_accel_profile(vel: np.ndarray, acc: np.ndarray, gate_direction: np.array = np.zeros(3)) -> bool:
+    """
+    Returns True if velocity and acceleration values are reasonable based on IRL testing
+
+    Args:
+        vel (np.ndarray): Velocity profile (n x 3)
+        acc (np.ndarray): Acceleration profile (n x 3)
+        gate_direction (np.array): Vector in direction of gate to evaluate if moving in right direction
+                                   If not provided, won't check if drone is moving in right direction
 
     Returns:
-    numpy.ndarray
-        Smoothed array with same shape as input
+        bool: GV constraints met or not
     """
-    # Make a copy to avoid modifying the original array
-    smoothed = arr.copy()
+    for v, a in zip(vel, acc):
+        limit = -0.3 * (np.linalg.norm(v) ** 3) + 2.0
+        acc_towards_vel = np.dot(v, a) > 0
+        vel_backwards = np.dot(v, gate_direction) < 0.0
 
-    # Process each column
-    for col in range(arr.shape[1]):
-        data = arr[:, col]
+        if np.linalg.norm(a) > limit and acc_towards_vel:
+            return False
 
-        # Calculate rolling mean and std
-        rolling_mean = np.convolve(data, np.ones(window_size)/window_size, mode='same')
-        rolling_std = np.array([np.std(data[max(0, i-window_size//2):min(len(data), i+window_size//2+1)])
-                                for i in range(len(data))])
+        if vel_backwards:
+            return False
 
-        # Calculate z-scores
-        z_scores = np.abs((data - rolling_mean) / (rolling_std + 1e-10))  # Add small value to avoid division by zero
-
-        # Identify outliers
-        outliers = z_scores > threshold
-
-        # Replace outliers with interpolated values
-        if np.any(outliers):
-            # Create indices for valid points
-            valid_indices = np.where(~outliers)[0]
-            outlier_indices = np.where(outliers)[0]
-
-            # Interpolate outliers using neighboring points
-            smoothed[outlier_indices, col] = np.interp(
-                outlier_indices,
-                valid_indices,
-                data[valid_indices]
-            )
-
-        # Apply final smoothing
-        smoothed[:, col] = np.convolve(smoothed[:, col],
-                                       np.ones(window_size)/window_size,
-                                       mode='same')
-
-    return smoothed
+    return True

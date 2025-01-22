@@ -1,10 +1,19 @@
 import os
 from typing import Union, List
 
+import matplotlib.axes
+import matplotlib.figure
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.colors import Normalize, LinearSegmentedColormap
+from matplotlib.legend_handler import HandlerBase
 import numpy as np
 from scipy.signal import savgol_filter
+
+from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
+from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
 
 def plot_reference_time_series(save_path: str, title: str, reference, sim_states=None):
@@ -171,7 +180,7 @@ def plot_states(
     vel: np.ndarray,
     acc: np.ndarray,
     plot_title: Union[str, None],
-    filename: str,
+    filename: Union[str, None],
 ):
     """
     Plot all dimensions of trajectory in 3x3 figure
@@ -191,7 +200,7 @@ def plot_states(
     # Create a 3x3 grid of subplots
     fig, axes = plt.subplots(3, 3, figsize=(12, 12))
     if plot_title is not None:
-        fig.suptitle('plot_title', fontsize=16)
+        fig.suptitle(plot_title, fontsize=16)
 
     for i in range(3):  # Rows: Position, Velocity, Acceleration
         for j in range(3):  # Columns: X, Y, Z dimensions
@@ -211,7 +220,10 @@ def plot_states(
 
     # Adjust layout
     plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.savefig(filename)
+    if filename is not None:
+        plt.savefig(filename)
+    else:
+        plt.show()
 
 
 def plot_ref_obs_states(
@@ -222,7 +234,7 @@ def plot_ref_obs_states(
     obs_vel: np.ndarray,
     obs_acc: np.ndarray,
     plot_title: Union[str, None],
-    filename: str,
+    filename: Union[str, None],
 ):
     """
     Plot all dimensions of trajectory in 3x3 figure with reference and observed data.
@@ -269,4 +281,174 @@ def plot_ref_obs_states(
 
     # Adjust layout
     plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.savefig(filename)
+    if filename is not None:
+        plt.savefig(filename)
+    else:
+        plt.show()
+
+
+def course_base_plot() -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
+    """Creates base plot for course
+
+    Returns:
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+    """
+    # Set up the figure and axes
+    fig, ax = plt.subplots(figsize=(8, 10))
+    ax.set_xlim(-1.5, 1.5)
+    ax.set_ylim(-2, 2)
+    ax.set_aspect('equal')
+
+    ax.set_xticks(np.arange(-1.5, 1.6, 1))
+    ax.set_yticks(np.arange(-2, 2.1, 1))
+    ax.grid(which='both', linestyle='--', linewidth=0.5)
+
+    return fig, ax
+
+
+class GateLegendHandler(HandlerBase):
+    def __init__(self, rect_color, left_circle_color, right_circle_color):
+        super().__init__()
+        self.rect_color = rect_color
+        self.left_circle_color = left_circle_color
+        self.right_circle_color = right_circle_color
+
+    def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
+        rect = patches.Rectangle(
+            [xdescent, ydescent + height / 4],
+            width / 2,
+            height / 1.5,
+            edgecolor='black',
+            facecolor=self.rect_color,
+            transform=trans,
+        )
+        left_circle = patches.Circle(
+            [xdescent - width / 8, ydescent + height / 2],
+            width / 10,
+            edgecolor='black',
+            facecolor=self.left_circle_color,
+            transform=trans,
+        )
+        right_circle = patches.Circle(
+            [xdescent + width / 2 + width / 8, ydescent + height / 2],
+            width / 10,
+            edgecolor='black',
+            facecolor=self.right_circle_color,
+            transform=trans,
+        )
+        return [rect, left_circle, right_circle]
+
+
+def add_gates_to_course(course: list[np.array], ax: plt.Axes):
+    """
+    Adds a list of gates to the plot
+
+    Args:
+        course (list[np.array]): Full course including the starting and ending point
+        ax (plt.Axes)
+    """
+    for obj in course[1:-1]:
+        x, y, z, yaw = obj
+        rect = patches.Rectangle((-0.25, -0.05), 0.5, 0.1, edgecolor='black', facecolor='white', alpha=0.8)
+        t = plt.matplotlib.transforms.Affine2D()
+        t.rotate(yaw)
+        t.translate(x, y)
+        rect.set_transform(t + ax.transData)
+        ax.add_patch(rect)
+
+        circle_color = 'black' if z == 0.525 else 'white'
+        left_circle = patches.Circle((-0.25 - 0.025, 0), 0.025, edgecolor='black',
+                                     facecolor=circle_color, transform=t + ax.transData)
+        right_circle = patches.Circle((0.25 + 0.025, 0), 0.025, edgecolor='black',
+                                      facecolor=circle_color, transform=t + ax.transData)
+        ax.add_patch(left_circle)
+        ax.add_patch(right_circle)
+
+        # arrow = patches.FancyArrow(0, 0, 0, 0.05, width=0.02, head_width=0.05,
+        #                            head_length=0.05, color='black', transform=t + ax.transData)
+        # ax.add_patch(arrow)
+
+    starting_face_color = 'black' if course[0][2] == 0.525 else 'white'
+    ending_face_color = 'black' if course[-1][2] == 0.525 else 'white'
+    ax.scatter([course[0][0]], [course[0][1]], s=100, marker='*', facecolor=starting_face_color, edgecolor='black')
+    ax.scatter([course[-1][0]], [course[-1][1]], s=100, marker='o', facecolor=ending_face_color, edgecolor='black')
+
+    high_patch = patches.Patch(color='none', label="High Gate (0.525 m)")
+    low_patch = patches.Patch(color='none', label="Low Gate (0.3 m)")
+
+    ax.legend(
+        handles=[high_patch, low_patch],
+        handler_map={
+            high_patch: GateLegendHandler('white', 'black', 'black'),
+            low_patch: GateLegendHandler('white', 'white', 'white'),
+        },
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.1),
+        ncol=2,
+        borderpad=0.7,
+    )
+
+
+def get_render_map(ref_vel: np.ndarray, max_point_size: float, min_point_size: float) -> tuple[list[float], list[str]]:
+    """
+    Returns point sizes and colors for trajectory rendering (2d/3d)
+
+    Args:
+        ref_vel (np.ndarray): Velocity profile
+        max_point_size (float): Max point size for full velocity
+        min_point_size (float): Min point size for zero velocity
+
+    Returns:
+        tuple[list[float], list[str]]: point_sizes, colors
+    """
+    MAX_VEL = 2.0  # m/s
+
+    vel_mag = np.linalg.norm(ref_vel, axis=1)
+    point_sizes = (max_point_size - min_point_size) * (vel_mag / MAX_VEL) + min_point_size
+
+    timestamps = np.linspace(0, 1, ref_vel.shape[0])
+    primary_colors = [matplotlib.rcParams['axes.prop_cycle'].by_key()['color'][0],
+                      matplotlib.rcParams['axes.prop_cycle'].by_key()['color'][1]]
+    colormap = LinearSegmentedColormap.from_list('custom_map', primary_colors)
+    norm = Normalize(vmin=0, vmax=1)
+
+    return point_sizes, colormap(norm(timestamps))
+
+
+def add_trajectory_to_course(trajectory: Union[PolynomialTrajectory, np.ndarray], velocity_profile=None, reference=False):
+    """
+    Add trajectory to a BEV gate plot with plt
+
+    Args:
+        trajectory (Union[PolynomialTrajectory, np.ndarray]): Trajectory to pot
+        velocity_profile (_type_, optional): Velocity profile for trajectory. Defaults to deriving the given trajectory.
+        reference (bool, optional): Draw the trajectory as a red reference line. Defaults to False.
+    """
+
+    if isinstance(trajectory, PolynomialTrajectory):
+        ref_pos = trajectory.as_ref_pos()
+    else:
+        ref_pos = trajectory
+    ref_vel = derive_trajectory(ref_pos, ctrl_freq=30) if velocity_profile is None else velocity_profile
+
+    # This code shows where a trajectory violates GV limits
+    # ref_acc = derive_trajectory(ref_vel, ctrl_freq=30)
+    # colors = []
+    # for v, a in zip(ref_vel, ref_acc):
+    #     limit = -0.3 * (np.linalg.norm(v) ** 3) + 2.0
+    #     acc_towards_vel = np.dot(v, a) > 0
+
+    #     if np.linalg.norm(a) > limit and acc_towards_vel:
+    #         colors.append('red')
+    #         continue
+
+    #     colors.append('blue')
+
+    MIN_POINT_SIZE = 5
+    MAX_POINT_SIZE = 125
+    point_sizes, colors = get_render_map(ref_vel, MAX_POINT_SIZE, MIN_POINT_SIZE)
+
+    if reference:
+        plt.plot(ref_pos[:, 0], ref_pos[:, 1], c='red', linewidth=2)
+    else:
+        plt.scatter(ref_pos[:, 0], ref_pos[:, 1], s=point_sizes, c=colors, marker='o', alpha=0.8)

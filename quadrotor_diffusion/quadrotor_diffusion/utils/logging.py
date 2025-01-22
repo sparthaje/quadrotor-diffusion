@@ -15,16 +15,19 @@ def iprint(*messages):
         print(f"[ {caller_filename.replace('.py', '')} ] {message}")
 
 
-def dataclass_to_table(data):
+def dataclass_to_table(data, title=None):
     """
     Converts a dataclass instance to a formatted table string with borders 
     and instance class name as title.
+
+    - data: Dataclass to use
+    - title: Title for table (default use class name)
     """
     if not hasattr(data, '__dataclass_fields__'):
         raise TypeError("Provided object is not a dataclass instance.")
 
     # Get class name for title
-    class_name = data.__class__.__name__
+    class_name = data.__class__.__name__ if title is None else title
 
     # Calculate max widths
     field_width = max(len(field.name) for field in fields(data))
