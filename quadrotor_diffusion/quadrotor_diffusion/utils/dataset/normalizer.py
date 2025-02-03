@@ -83,3 +83,21 @@ class MinMaxNormalizer(Normalizer):
 
     def __str__(self):
         return f"MinMaxNormalizer: min={self.mins}\tmaxes={self.maxes}"
+
+
+class NormalizerTuple(Normalizer):
+    def __init__(self, normalizer_a: Normalizer, normalizer_b: Normalizer):
+        """
+        Used in datasets where theres two series of data to normalize
+        """
+        self.normalizer_a = normalizer_a
+        self.normalizer_b = normalizer_b
+
+    def __call__(self, array_a: np.array, array_b: np.array) -> tuple[np.array, np.array]:
+        return self.normalizer_a(array_a), self.normalizer_b(array_b)
+
+    def undo(self, normalized_array_a: np.array, normalized_array_b: np.array) -> tuple[np.array, np.array]:
+        return self.normalizer_a.undo(normalized_array_a), self.normalizer_b.undo(normalized_array_b)
+
+    def __str__(self):
+        return f"Normalizer a: {self.normalizer_a}, Normalizer b: {self.normalizer_b}"

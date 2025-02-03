@@ -73,7 +73,9 @@ class ConfigFactory:
             config_dict["algo_config"] = get_config(args.algo)
             config_dict["task_config"] = get_config(args.task)
         else:
-            warnings.warn("No agent/task config given.")
+            # NOTE(shreepa): don't need a task for this work
+            pass
+            # warnings.warn("No agent/task config given.")
         if args.use_gpu:
             config_dict["use_gpu"] = args.use_gpu
         # Experiment-specific overrides, e.g. training hyperparameters.
@@ -84,7 +86,7 @@ class ConfigFactory:
             kv_dict = {}
             for kv in args.kv_overrides:
                 k, v = kv.split("=")
-                try:   
+                try:
                     v = eval(v)  # String as a python expression.
                 except:
                     pass  # Normal python string.

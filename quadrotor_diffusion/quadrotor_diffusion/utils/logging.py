@@ -2,6 +2,8 @@ from dataclasses import fields
 import os
 import inspect
 
+old_print = print
+
 
 def iprint(*messages):
     caller_frame = inspect.stack()[1]

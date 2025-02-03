@@ -62,15 +62,29 @@ class PolynomialTrajectory:
 
         return boundary_conditions, self.segment_lengths
 
-    def as_ref_pos(self, ctrl_freq=30) -> np.ndarray:
+    def as_ref_pos(self, ctrl_freq=30, pad_to=None) -> np.ndarray:
         """
         Returns ref_pos for trajectory
         - ctrl_freq: Points per second
+        - pad_to: Minimum number of rows
 
         Returns:
             np.ndarray: (nx3) array of positions xyz where time step is 1/ctrl_freq
         """
-        return get_positions_from_boundary_conditions(*self.as_boundaries(), ctrl_freq)
+        ref_pos = get_positions_from_boundary_conditions(*self.as_boundaries(), ctrl_freq)
+
+        if pad_to is None:
+            return ref_pos
+
+        if ref_pos.shape[0] > pad_to:
+            raise ValueError("Reference is larger than min number of rows")
+
+        padding = pad_to - ref_pos.shape[0]
+        if padding > 0:
+            last_row = ref_pos[-1]
+            additional_rows = np.tile(last_row, (padding, 1))
+            ref_pos = np.vstack((ref_pos, additional_rows))
+        return ref_pos
 
     def __str__(self):
         return f"{sum(self.segment_lengths):.2f}"

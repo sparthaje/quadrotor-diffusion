@@ -172,3 +172,8 @@ class VAE_Loss(nn.Module):
         loss_dict["KL_Divergence"] = kl_loss
 
         return loss_dict
+
+        return {
+            "loss": loss,
+            "CrossEntropy": loss
+        }

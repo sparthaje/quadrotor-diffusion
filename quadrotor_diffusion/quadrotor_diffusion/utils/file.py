@@ -1,8 +1,11 @@
 import os
 import re
 from typing import Tuple
+import pickle
 
 import numpy as np
+
+from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
 
 
 def get_experiment_folder(train_dir: str, experiment_number: int):
@@ -66,3 +69,32 @@ def load_trajectory(filepath: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     traj = np.load(filepath)
 
     return traj[0], traj[1], traj[2]
+
+
+def load_course_trajectory(course_type: str, course_number: int, sample_number: int) -> tuple[list[np.array], PolynomialTrajectory, str]:
+    """
+    Loads trajectory sample
+
+    Args:
+        course_type (str): course type: linear/u
+        course_number (int): Course number
+        sample_number (int): Sample number in valid folder
+
+    Returns:
+        tuple[list[np.array], PolynomialTrajectory, str]: course, sample trajectory, trajectory filename
+    """
+
+    base_dir = "data/courses"
+    base_dir = os.path.join(base_dir, course_type, str(course_number), "valid")
+    all_filenames = os.listdir(base_dir)
+    filename = [f for f in all_filenames if f.startswith(f"{sample_number}_")][0]
+    filename = os.path.join(base_dir, filename)
+
+    with open(filename, "rb") as file:
+        trajectory: PolynomialTrajectory = pickle.load(file)
+
+    base_dir = "data/courses"
+    course_filename = os.path.join(base_dir, course_type, str(course_number), "course.npy")
+    course = np.load(course_filename)
+
+    return course, trajectory, filename

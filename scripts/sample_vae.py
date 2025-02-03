@@ -1,5 +1,7 @@
+import os
 from random import randint
 import argparse
+import pickle
 
 import torch
 import numpy as np
@@ -10,16 +12,16 @@ from quadrotor_diffusion.utils.nn.post_process import fit_to_recon
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
-from quadrotor_diffusion.utils.dataset.dataset import QuadrotorTrajectoryDataset
-from quadrotor_diffusion.utils.file import get_checkpoint_file, save_trajectory
+from quadrotor_diffusion.utils.file import get_checkpoint_file, load_course_trajectory, get_experiment_folder
 from quadrotor_diffusion.utils.logging import iprint as print
-from quadrotor_diffusion.utils.simulator import play_trajectory
-from quadrotor_diffusion.utils.trajectory import derive_trajectory
+from quadrotor_diffusion.utils.simulator import play_trajectory, render_simulation
+from quadrotor_diffusion.utils.nn.post_process import fit_to_recon
+from quadrotor_diffusion.utils.plotting import course_base_plot, add_gates_to_course, add_trajectory_to_course
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-e', '--experiment', type=int, help='Experiment number', required=True)
-parser.add_argument('-s', '--sample', type=int, help='Sample number', required=True)
+parser.add_argument('-s', '--sample', type=str, help='Sample (course_type,course_number,sample_number)', required=True)
 
 parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is biggest', default=None)
 parser.add_argument('-d', '--device', type=str, help='Device to use', default="cuda")
@@ -34,139 +36,43 @@ trainer_args: TrainerArgs = None
 
 chkpt = get_checkpoint_file("logs/training", args.experiment)
 model, ema, normalizer, trainer_args = Trainer.load(chkpt)
-data = QuadrotorTrajectoryDataset("data/quadrotor_random", normalizer, order=0)
 print("Loaded", chkpt)
 
 eval = ema if args.ema else model
 eval = eval.to(args.device)
-sample = data[args.sample]
-ref_pos = normalizer.undo(sample)
 
-CUT_OFF = 50
+sample_info = args.sample.split(",")
+course, trajectory, filename = load_course_trajectory(*sample_info)
+print(f"Loaded trajectory from {filename}")
 
-sample_works, drone_states_ref = play_trajectory(ref_pos[:-CUT_OFF, :])
-print(f"Finished simulation on sample data {'succesfully' if sample_works else 'unsuccesfully'}\n")
+experiments_folder = get_experiment_folder("logs/training", args.experiment)
 
-inp = torch.tensor(sample).float()
+ref_pos = trajectory.as_ref_pos()
+
+sample_works, drone_states_ref = play_trajectory(ref_pos)
+print(f"Finished simulation on sample data {'succesfully' if sample_works else 'unsuccesfully'}")
+reference_filename = os.path.join("logs/training", experiments_folder, "reference.mp4")
+render_simulation(drone_states_ref, course, ref_pos, reference_filename)
+
+padded_ref_pos = trajectory.as_ref_pos(pad_to=360)
+normalized_reference = normalizer(padded_ref_pos)
+inp = torch.tensor(normalized_reference).float()
 inp = inp.unsqueeze(0)
 inp = inp.to(args.device)
 mu, logvar = eval.encode(inp, padding=32)
 model_out = eval.decode(mu, padding=32).squeeze(0).cpu().numpy()
 reconstructed = normalizer.undo(model_out)
+reconstructed = reconstructed[:ref_pos.shape[0] - padded_ref_pos.shape[0], :]
 
-recon_works, drone_states_recon = play_trajectory(reconstructed[:-CUT_OFF, :])
-print(f"Finished simulation on reconstructed data {'succesfully' if recon_works else 'unsuccesfully'}\n")
+fitted = fit_to_recon(reconstructed, 30)
+recon_works, drone_states_recon = play_trajectory(ref_pos=fitted[0], ref_vel=fitted[1], ref_acc=fitted[2])
+print(f"Finished simulation on reconstructed data {'succesfully' if recon_works else 'unsuccesfully'}")
+recon_filename = os.path.join("logs/training", experiments_folder, "reconstructed.mp4")
+render_simulation(drone_states_recon, course, reconstructed, filename=recon_filename)
 
-fit_pos, fit_vel, fit_acc = fit_to_recon(reconstructed, 30)
-fit_pos = fit_pos[:-CUT_OFF, :]
-fit_vel = fit_vel[:-CUT_OFF, :]
-fit_acc = fit_acc[:-CUT_OFF, :]
-
-recon_fitted_works, drone_states_recon_fitted = play_trajectory(fit_pos, fit_vel, fit_acc)
-print(f"Finished simulation on fitted reconstructed data {'succesfully' if recon_works else 'unsuccesfully'}\n")
-
-save_trajectory("sample.trajectory.npy", ref_pos, derive_trajectory(
-    ref_pos, 30), derive_trajectory(ref_pos, 30, order=2))
-save_trajectory("fitted.trajectory.npy", fit_pos, fit_vel, fit_acc)
-
-# region: plot initial inputs
-plt.figure(figsize=(18, 12))
-
-# Position plots
-plt.subplot(3, 3, 1)
-plt.plot(ref_pos[:, 0][:-CUT_OFF], linewidth=3.5)
-plt.plot(fit_pos[:, 0], linewidth=3.5)
-plt.ylabel("x (meters)")
-plt.grid()
-plt.subplot(3, 3, 2)
-plt.plot(ref_pos[:, 1][:-CUT_OFF], linewidth=3.5)
-plt.plot(fit_pos[:, 1], linewidth=3.5)
-plt.ylabel("y (meters)")
-plt.grid()
-plt.subplot(3, 3, 3)
-plt.plot(ref_pos[:, 2][:-CUT_OFF], linewidth=3.5)
-plt.plot(fit_pos[:, 2], linewidth=3.5)
-plt.ylabel("z (meters)")
-plt.grid()
-
-# Velocity plots
-plt.subplot(3, 3, 4)
-plt.plot(fit_vel[:, 0], linewidth=3.5)
-plt.ylabel("vx (m/s)")
-plt.grid()
-plt.subplot(3, 3, 5)
-plt.plot(fit_vel[:, 1], linewidth=3.5)
-plt.ylabel("vy (m/s)")
-plt.grid()
-plt.subplot(3, 3, 6)
-plt.plot(fit_vel[:, 2], linewidth=3.5)
-plt.ylabel("vz (m/s)")
-plt.grid()
-
-# Acceleration plots
-plt.subplot(3, 3, 7)
-plt.plot(fit_acc[:, 0], linewidth=3.5)
-plt.ylabel("ax (m/s²)")
-plt.grid()
-plt.subplot(3, 3, 8)
-plt.plot(fit_acc[:, 1], linewidth=3.5)
-plt.ylabel("ay (m/s²)")
-plt.grid()
-plt.subplot(3, 3, 9)
-plt.plot(fit_acc[:, 2], linewidth=3.5)
-plt.ylabel("az (m/s²)")
-plt.grid()
-
-plt.tight_layout()
-plt.subplots_adjust(top=0.9)
-plt.figlegend(['Reference', 'Fit'], loc='upper center', ncol=3, frameon=False)
-plt.savefig("vae.pdf")
-# endregion
-
-plt.figure(figsize=(18, 12))
-
-# Position plots
-plt.subplot(3, 3, 1)
-plt.plot(drone_states_ref[0][:, 0], linewidth=3.5)
-plt.plot(drone_states_recon[0][:, 0], linewidth=3.5)
-plt.plot(drone_states_recon_fitted[0][:, 0], linewidth=3.5)
-plt.ylabel("x (meters)")
-plt.grid()
-plt.subplot(3, 3, 2)
-plt.plot(drone_states_ref[0][:, 1], linewidth=3.5)
-plt.plot(drone_states_recon[0][:, 1], linewidth=3.5)
-plt.plot(drone_states_recon_fitted[0][:, 1], linewidth=3.5)
-plt.ylabel("y (meters)")
-plt.grid()
-plt.subplot(3, 3, 3)
-plt.plot(drone_states_ref[0][:, 2], linewidth=3.5)
-plt.plot(drone_states_recon[0][:, 2], linewidth=3.5)
-plt.plot(drone_states_recon_fitted[0][:, 2], linewidth=3.5)
-plt.ylabel("z (meters)")
-plt.grid()
-
-# Velocity plots
-plt.subplot(3, 3, 4)
-plt.plot(drone_states_ref[1][:, 0], linewidth=3.5)
-plt.plot(drone_states_recon[1][:, 0], linewidth=3.5)
-plt.plot(drone_states_recon_fitted[1][:, 0], linewidth=3.5)
-plt.ylabel("vx (m/s)")
-plt.grid()
-plt.subplot(3, 3, 5)
-plt.plot(drone_states_ref[1][:, 1], linewidth=3.5)
-plt.plot(drone_states_recon[1][:, 1], linewidth=3.5)
-plt.plot(drone_states_recon_fitted[1][:, 1], linewidth=3.5)
-plt.ylabel("vy (m/s)")
-plt.grid()
-plt.subplot(3, 3, 6)
-plt.plot(drone_states_ref[1][:, 2], linewidth=3.5)
-plt.plot(drone_states_recon[1][:, 2], linewidth=3.5)
-plt.plot(drone_states_recon_fitted[1][:, 2], linewidth=3.5)
-plt.ylabel("vz (m/s)")
-plt.grid()
-plt.tight_layout()
-plt.subplots_adjust(top=0.9)
-plt.figlegend(['Reference', 'Reconstructed from Latent', 'Filtered + Interpolation Reconstructed'],
-              loc='upper center', ncol=3, frameon=False)
-plt.suptitle("Evaluating Sample Data in Simulator")
-plt.savefig("va2.pdf")
+_, ax = course_base_plot()
+add_gates_to_course(course, ax)
+add_trajectory_to_course(fitted[0], velocity_profile=fitted[1])
+add_trajectory_to_course(ref_pos, reference=True)
+trajectory_fig_filename = os.path.join("logs/training", experiments_folder, "trajectories.pdf")
+plt.savefig(trajectory_fig_filename)

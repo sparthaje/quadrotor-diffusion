@@ -3,6 +3,7 @@ import copy
 import time
 from datetime import datetime
 from typing import Tuple
+import warnings
 
 import torch
 import torch.nn as nn
@@ -16,6 +17,10 @@ from quadrotor_diffusion.utils.logging import (
     dataclass_to_table,
     iprint as print
 )
+
+# TODO(shreepa): Probably should fix this at some point
+# Suppress FutureWarning for this specific issue
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*torch.load.*weights_only=False.*")
 
 
 class Trainer:
@@ -60,7 +65,14 @@ class Trainer:
     @torch.no_grad()
     def test_forward_pass(self):
         start = time.time()
-        first_item: torch.Tensor = next(iter(self.train_data_loader)).to(self.args.device)
+        first_item: torch.Tensor | dict[str, torch.Tensor] = next(iter(self.train_data_loader))
+
+        # If dataset uses a dict, move each tensor to gpu
+        if type(first_item) == dict:
+            first_item = {k: v.to(self.args.device) for k, v in first_item.items()}
+        else:
+            first_item = first_item.to(self.args.device)
+
         if self.multi_gpu:
             loss = self.model.module.compute_loss(first_item)
         else:
@@ -75,16 +87,22 @@ class Trainer:
             epoch_losses = {}
 
             start = time.time()
+            samples_seen = 0
             for batch in tqdm.tqdm(self.train_data_loader, desc=f"[ training ] Epoch {epoch+1}"):
-                batch = batch.to(self.args.device)
+                # If dataset uses a dict, move each tensor to gpu
+                if type(batch) == dict:
+                    batch = {k: v.to(self.args.device) for k, v in batch.items()}
+                else:
+                    batch = batch.to(self.args.device)
+
                 self.batches_seen += 1
 
                 loss_dict = self.model.module.compute_loss(batch) if isinstance(
                     self.model, nn.DataParallel) else self.model.compute_loss(batch)
 
+                # Average loss per sample in batch
                 loss = loss_dict["loss"]
-                loss /= self.args.batches_per_backward
-                loss.backward()
+                (loss / self.args.batches_per_backward).backward()
 
                 if self.batches_seen % self.args.batches_per_backward == 0:
                     self.optimizer.step()
@@ -102,18 +120,20 @@ class Trainer:
                     )
 
                 detached_losses = {k: v.detach().cpu().item() for k, v in loss_dict.items()}
-                detached_losses["loss"] *= self.args.batches_per_backward
+                batch_size = len(batch) if type(batch) != dict else len(next(iter(batch.values())))
                 for k, v in detached_losses.items():
                     if k not in epoch_losses:
                         epoch_losses[k] = 0.0
-                    epoch_losses[k] += v
 
-            epoch_losses = {k: v / len(self.train_data_loader.dataset)
-                            for k, v in epoch_losses.items()}
+                    # This converts it to total loss across all samples in batch
+                    epoch_losses[k] += v * batch_size
+                samples_seen += batch_size
+
+            epoch_losses = {k: v / samples_seen for k, v in epoch_losses.items()}
             if (epoch + 1) % self.args.save_freq == 0:
                 self.save(epoch, epoch_losses["loss"])
 
-            log_stmnt = f"Epoch {epoch + 1}: Avg Loss per Sample {epoch_losses['loss']:.1e} {time.time() - start:.2f}s"
+            log_stmnt = f"Epoch {epoch + 1}: Avg Loss per Sample {epoch_losses['loss']:.3e} {time.time() - start:.2f}s"
             print(log_stmnt, "\n")
 
             log_parts = [
@@ -181,7 +201,7 @@ class Trainer:
         print(f"Saved to {filename}")
 
     @staticmethod
-    def load(filepath) -> Tuple[nn.Module, nn.Module, Normalizer, TrainerArgs]:
+    def load(filepath, get_ema=True) -> Tuple[nn.Module, nn.Module, Normalizer, TrainerArgs]:
         """
         Loads from a checkpoint
 
@@ -198,7 +218,8 @@ class Trainer:
         model.load_state_dict(state_dict["model_state"])
 
         ema_model = model_type(state_dict["args"])
-        ema_model.load_state_dict(state_dict["ema_model_state"])
+        if get_ema:
+            ema_model.load_state_dict(state_dict["ema_model_state"])
 
         return (
             model,

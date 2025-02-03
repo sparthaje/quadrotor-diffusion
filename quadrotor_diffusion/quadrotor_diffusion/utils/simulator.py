@@ -75,6 +75,11 @@ def play_trajectory(ref_pos: np.ndarray,
         # Give it 1/3 second of just hover to stabilize similar to how I would run real experiment
         padding = 10
         ref_pos = np.vstack([np.vstack([ref_pos[0]] * padding), ref_pos])
+        if ref_vel is not None:
+            ref_vel = np.vstack([np.vstack([ref_vel[0]] * padding), ref_vel])
+        if ref_acc is not None:
+            ref_acc = np.vstack([np.vstack([ref_acc[0]] * padding), ref_acc])
+
         if ref_vel is None or ref_acc is None:
             ref_vel = derive_trajectory(ref_pos, CTRL_FREQ)
             ref_acc = derive_trajectory(ref_vel, CTRL_FREQ)

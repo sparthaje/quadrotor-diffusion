@@ -71,6 +71,14 @@ class VAE_WrapperArgs:
 
 
 @dataclass
+class CourseEmbeddingArgs:
+    hidden_dim: int
+    n_layers: int
+    embed_dim: int
+    gate_input_dim: int
+
+
+@dataclass
 class TrainerArgs:
     """
     ema_decay: EMA rate to update model

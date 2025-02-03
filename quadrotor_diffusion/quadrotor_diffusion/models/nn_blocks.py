@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 
 
@@ -79,3 +80,46 @@ class Upsample1d(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
+
+############################################### Other nice stuff ############################################
+
+def soft_argmax(x: torch.Tensor, alpha: float = 10.0) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Differentiable approximation to the argmax.
+
+    Args:
+        x (torch.Tensor): will compute across last dimension
+        alpha: Temperature parameter. Higher => closer to one-hot.
+
+    Returns:
+        - max index (torch.Tensor): 0 ≤ t < n
+        - max value (torch.Tensor): max value in x
+    """
+    # Compute softmax over x scaled by alpha
+    w = F.softmax(alpha * x, dim=-1)
+
+    # Weighted sum of indices: 0 * w[0] + 1 * w[1] + ... + (n-1) * w[n-1]
+    indices = torch.arange(x.shape[-1], device=x.device, dtype=x.dtype).unsqueeze(0)
+    soft_argmax = torch.sum(indices * w, dim=-1)
+    soft_max = torch.sum(x * w, dim=-1)
+
+    return soft_argmax, soft_max
+
+
+def soft_argmin(x: torch.Tensor, alpha: float = 10.0) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Differentiable approximation to the argmin.
+
+    Args:
+        x (torch.Tensor): will compute across the last dimension
+        alpha: Temperature parameter. Higher => closer to one-hot.
+
+    Returns:
+        - min index (torch.Tensor): 0 ≤ t < n
+        - min value (torch.Tensor): min value in x
+    """
+    # Compute softmax over x scaled by alpha
+    soft_argmin, neg_soft_min = soft_argmax(-x, alpha)
+
+    return soft_argmin, -neg_soft_min
