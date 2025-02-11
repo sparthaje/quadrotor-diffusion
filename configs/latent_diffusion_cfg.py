@@ -1,26 +1,27 @@
-# quadrotor_accel_diff
+# latent_diffusion_cfg
 
 import numpy as np
 
 from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
-from quadrotor_diffusion.utils.dataset.normalizer import GuassianNormalizer, NoNormalizer, MinMaxNormalizer
-from quadrotor_diffusion.utils.dataset.dataset import QuadrotorAcc
+from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, NormalizerTuple
+from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset
 
 unet_args = Unet1DArgs(
-    traj_dim=3,
-    features=32,
+    traj_dim=6,
+    features=128,
     channel_mults=[1, 2, 4, 8],
     attentions=[
-        [True, True, True, False],
+        [False, False, False, False],
         [False],
-        [False, True, True]
+        [False, False, False]
     ]
 )
 
 diff_args = DiffusionWrapperArgs(
     predict_epsilon=True,
     loss="L1Loss",
-    n_timesteps=1000
+    n_timesteps=100,
+    loss_params=None
 )
 
 train_args = TrainerArgs(
@@ -37,10 +38,12 @@ train_args = TrainerArgs(
     learning_rate=2e-4,
     num_gpus=1,
     device="cuda:2",
-
-    max_epochs=150
+    max_epochs=200,
+    evaluate_every=1
 )
 
-normalizer = NoNormalizer()  # MinMaxNormalizer(mins=np.array([-2.0, -2.0, -2.0]), maxes=np.array([2.0, 2.0, 2.0]))
+embedding_experiment = 79
 
-dataset = QuadrotorAcc('data/quadrotor_random', normalizer)
+normalizer = NoNormalizer()
+
+dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 360, normalizer)

@@ -5,7 +5,18 @@ from scipy.interpolate import UnivariateSpline
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
 
-def fit_to_recon(recon_pos, ctrl_freq):
+def fit_to_recon(recon_pos: np.ndarray, ctrl_freq: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Fit the reconstructed position to a smooth trajectory
+
+    Args:
+        recon_pos (np.ndarray): nx3 position array
+        ctrl_freq (int): The frequency of the data in the array
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: Fitted position, velocity, and accel data as function of time
+    """
+
     x = recon_pos[:, 0]
     y = recon_pos[:, 1]
     z = recon_pos[:, 2]
@@ -28,8 +39,6 @@ def fit_to_recon(recon_pos, ctrl_freq):
     vel_fitted = np.column_stack((spline_vx(t), spline_vy(t), spline_vz(t)))
     vel_fitted[0] = np.array([0.0, 0.0, 0.0])
     vel_fitted[1] = np.array([0.0, 0.0, 0.0])
-
-    # TODO(shreepa): all sample data should have 0 vel / accel to start and end with
 
     derived_accel = derive_trajectory(vel_fitted, 30, order=1)
     derived_accel_smooth = savgol_filter(derived_accel, window_length=50, polyorder=3, axis=0)

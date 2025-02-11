@@ -61,6 +61,7 @@ class Trainer:
         self.train_data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         self.normalizer: Normalizer = dataset.normalizer
         self.create_log_dir()
+        self.epoch = 0
 
     @torch.no_grad()
     def test_forward_pass(self):
@@ -74,21 +75,20 @@ class Trainer:
             first_item = first_item.to(self.args.device)
 
         if self.multi_gpu:
-            loss = self.model.module.compute_loss(first_item)
+            loss = self.model.module.compute_loss(first_item, debug=True)
         else:
-            loss = self.model.compute_loss(first_item)
+            loss = self.model.compute_loss(first_item, debug=True)
         duration = time.time() - start
         print(f"Forward pass succeeded in {duration:.2f}s")
         return loss
 
     def train(self):
-        epoch = 0
-        while self.args.max_epochs is None or epoch < self.args.max_epochs:
+        while self.args.max_epochs is None or self.epoch < self.args.max_epochs:
             epoch_losses = {}
 
             start = time.time()
             samples_seen = 0
-            for batch in tqdm.tqdm(self.train_data_loader, desc=f"[ training ] Epoch {epoch+1}"):
+            for batch in tqdm.tqdm(self.train_data_loader, desc=f"[ training ] Epoch {self.epoch+1}"):
                 # If dataset uses a dict, move each tensor to gpu
                 if type(batch) == dict:
                     batch = {k: v.to(self.args.device) for k, v in batch.items()}
@@ -97,8 +97,8 @@ class Trainer:
 
                 self.batches_seen += 1
 
-                loss_dict = self.model.module.compute_loss(batch) if isinstance(
-                    self.model, nn.DataParallel) else self.model.compute_loss(batch)
+                loss_dict = self.model.module.compute_loss(batch, epoch=self.epoch) if isinstance(
+                    self.model, nn.DataParallel) else self.model.compute_loss(batch, epoch=self.epoch)
 
                 # Average loss per sample in batch
                 loss = loss_dict["loss"]
@@ -130,14 +130,14 @@ class Trainer:
                 samples_seen += batch_size
 
             epoch_losses = {k: v / samples_seen for k, v in epoch_losses.items()}
-            if (epoch + 1) % self.args.save_freq == 0:
-                self.save(epoch, epoch_losses["loss"])
+            if (self.epoch + 1) % self.args.save_freq == 0:
+                self.save(self.epoch, epoch_losses["loss"])
 
-            log_stmnt = f"Epoch {epoch + 1}: Avg Loss per Sample {epoch_losses['loss']:.3e} {time.time() - start:.2f}s"
+            log_stmnt = f"Epoch {self.epoch + 1}: Avg Loss per Sample {epoch_losses['loss']:.3e} {time.time() - start:.2f}s"
             print(log_stmnt, "\n")
 
             log_parts = [
-                str(epoch),
+                str(self.epoch),
                 f"{time.time() - start:.2f}"
             ]
 
@@ -148,9 +148,11 @@ class Trainer:
             with open(os.path.join(self.args.log_dir, "logs.csv"), "a") as f:
                 f.write(log_stmnt + "\n")
 
-            epoch += 1
+            self.epoch += 1
 
     def create_log_dir(self):
+        losses = self.test_forward_pass()
+
         now = datetime.now()
         date_str = now.strftime("%b.%d_%I:%M_%p")
 
@@ -169,7 +171,6 @@ class Trainer:
         print(f"Save directory created: {new_dir_path}")
         self.args.log_dir = new_dir_path
 
-        losses = self.test_forward_pass()
         loss_components = sorted(losses.keys())
         with open(os.path.join(self.args.log_dir, "logs.csv"), "w") as f:
             f.write("epoch,time," + ','.join(loss_components) + "\n")

@@ -27,7 +27,7 @@ class ResNet1DBlock(nn.Module):
 
         self.blocks = nn.ModuleList([
             Conv1dNormalized(c_in, c_out, kernel_size),
-            Conv1dNormalized(c_in, c_out, kernel_size),
+            Conv1dNormalized(c_out, c_out, kernel_size),
         ])
 
         # Transform input sinusoidal embeddings tino output dimensions
@@ -47,7 +47,7 @@ class ResNet1DBlock(nn.Module):
         t_embed: [batch_size x embeed_dim]
         """
         out = self.blocks[0](x) + self.time_mlp(t_embed)
-        out = self.blocks[1](x)
+        out = self.blocks[1](out)
         return out + self.residual_conv(x)
 
 

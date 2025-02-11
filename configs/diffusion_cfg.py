@@ -1,14 +1,14 @@
-# quadrotor_random
+# diffusion_cfg
 
 import numpy as np
 
 from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
-from quadrotor_diffusion.utils.dataset.normalizer import GuassianNormalizer, NoNormalizer
-from quadrotor_diffusion.utils.dataset.dataset import QuadrotorTrajectoryDataset
+from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer
+from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset
 
 unet_args = Unet1DArgs(
     traj_dim=3,
-    features=32,
+    features=64,
     channel_mults=[1, 2, 4, 8],
     attentions=[
         [False, False, False, False],
@@ -19,8 +19,9 @@ unet_args = Unet1DArgs(
 
 diff_args = DiffusionWrapperArgs(
     predict_epsilon=True,
-    loss="MSELoss",
-    n_timesteps=100
+    loss="L1Loss",
+    n_timesteps=30,
+    loss_params=None
 )
 
 train_args = TrainerArgs(
@@ -28,19 +29,19 @@ train_args = TrainerArgs(
     num_batches_no_ema=20,
     num_batches_per_ema=10,
 
-    batch_size_per_gpu=1024,
-    batches_per_backward=1,
+    batch_size_per_gpu=128,
+    batches_per_backward=4,
 
     log_dir="logs/training/",
     save_freq=5,
 
     learning_rate=2e-4,
     num_gpus=1,
-    device="cuda:2",
-
-    max_epochs=150
+    device="cuda:0",
+    max_epochs=200,
+    evaluate_every=5
 )
 
-normalizer = GuassianNormalizer(mean=np.array([0., 0., 0.]), variance=np.array([1.3, 1.3, 0.02]))
+normalizer = NoNormalizer()
 
-dataset = QuadrotorTrajectoryDataset('data/quadrotor_random', normalizer)
+dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 360, normalizer)

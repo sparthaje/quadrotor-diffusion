@@ -1,3 +1,5 @@
+import random
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,7 +8,6 @@ import einops
 from quadrotor_diffusion.models.vae import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.args import CourseEmbeddingArgs, VAE_WrapperArgs, VAE_EncoderArgs, VAE_DecoderArgs
 from quadrotor_diffusion.models.nn_blocks import soft_argmax, soft_argmin
-from quadrotor_diffusion.models.losses import BiDirectionalZLPRLoss
 from quadrotor_diffusion.utils.logging import iprint as print
 
 
@@ -18,10 +19,10 @@ class ContrastiveWrapper(nn.Module):
         self.args = args
 
         # Non-linear projection of gates from R^4 to R^{embed_dim}
-        course_encoder = [nn.Linear(args[0].gate_input_dim, args[0].hidden_dim), nn.Mish()]
+        course_encoder = [nn.Linear(args[0].gate_input_dim, args[0].hidden_dim), nn.Tanh()]
         for _ in range(args[0].n_layers):
             course_encoder.append(nn.Linear(args[0].hidden_dim, args[0].hidden_dim))
-            course_encoder.append(nn.Mish())
+            course_encoder.append(nn.Tanh())
         course_encoder.append(nn.Linear(args[0].hidden_dim, args[0].embed_dim))
         self.course_encoder = nn.Sequential(*course_encoder)
 
@@ -29,10 +30,10 @@ class ContrastiveWrapper(nn.Module):
         self.trajectory_encoder = VAE_Wrapper((args[1], args[2], args[3]))
 
         # Non-linear projection of trajectory latents from R^{latent_dim} into R^{embed_dim}
-        trajectory_projection = [nn.Linear(args[2].latent_dim, args[0].hidden_dim), nn.Mish()]
+        trajectory_projection = [nn.Linear(args[2].latent_dim, args[0].hidden_dim), nn.Tanh()]
         for _ in range(args[0].n_layers):
             trajectory_projection.append(nn.Linear(args[0].hidden_dim, args[0].hidden_dim))
-            trajectory_projection.append(nn.Mish())
+            trajectory_projection.append(nn.Tanh())
         trajectory_projection.append(nn.Linear(args[0].hidden_dim, args[0].embed_dim))
         self.trajectory_projection = nn.Sequential(*trajectory_projection)
 
@@ -42,7 +43,7 @@ class ContrastiveWrapper(nn.Module):
     @torch.no_grad()
     def embed_course(self, courses: torch.Tensor) -> torch.Tensor:
         """
-        Computes embeddings for courses without gradient. 
+        Computes embeddings for courses without gradient.
         Args:
             courses (torch.Tensor): Course embedding. Shape [batch_size, N_gates (6), N_features (4)]
         Returns:
@@ -135,7 +136,7 @@ class ContrastiveWrapper(nn.Module):
 
         return alignment_scores
 
-    def compute_loss(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    def compute_loss(self, batch: dict[str, torch.Tensor], epoch=0, **kwargs) -> torch.Tensor:
         """
         Computes contrastive loss between trajectory and course
 
@@ -143,7 +144,7 @@ class ContrastiveWrapper(nn.Module):
             batch (dict[str, torch.Tensor]): Has to have keys "trajectory" and "course"
                 -> batch["trajectory"]: [B, Horizon, XYZ (3)]
                 -> batch["course"]: [B, N_gates x N_features]
-                -> batch["gate_positions"]: [B, N_gates] describing what idx each gate gets passed through in trajectory
+                -> batch["gate_positions"]: [B, N_gates] What idx each gate gets passed through in original trajectory
 
             epoch (int): Current epoch of training
             **kwargs: Captures other arguments which other compute_loss methods might use
@@ -152,33 +153,78 @@ class ContrastiveWrapper(nn.Module):
             torch.Tensor: Loss dict from one of the `losses.py` losses
         """
 
-        # 1. Extract features of each modality and normalize across embed_dim
-
-        # [B, N_gates, embed_dim]
         course_embedding = self._embed_course(batch["course"])
 
-        # Encoding trajectory is done with torch.no_grad() internally because the encoder is already trained,
-        # [B, VAE horizon, VAE latent dim]
-        trajectory_mu, _ = self.trajectory_encoder.encode(batch["trajectory"], padding=32)
+        # ======== Loss along horizon (row wise loss) ========
+        # Teach the embeddings how to differentiate matches from neighboring embeddings
 
-        # 2. Similarity between embeddings
+        # [B, VAE_horizon, Latent features]
+        trajectory_mu, _ = self.trajectory_encoder.encode(batch["trajectory"], padding=self.args[0].vae_padding)
 
-        # [B, N_gates, VAE horizon]
+        # [B, N_gates, VAE_horizon]
         cosine_similarity = self.get_cosine_similarity(course_embedding, trajectory_mu) * torch.exp(self.temperature)
 
-        gate_positions = (batch["gate_positions"] + 32) // self.traj_latent_downsample
+        # [B, N_gates]
+        gate_positions = (batch["gate_positions"] + self.args[0].vae_padding) // self.traj_latent_downsample
 
-        # 3) Compute loss for each gate embedding vs trajectory vector i
+        # Flatten target to [B * N_gates] and cosine_similarity to [B * N_gates, VAE horizon]
+        target = gate_positions.reshape(-1)
+        pred = cosine_similarity.reshape(-1, cosine_similarity.size(-1))
+
+        # Compute the row-wise loss where there's a lot of negative samples
+        row_loss = F.cross_entropy(pred, target, reduction='mean')
+
+        # ======== Loss along column (col wise loss) ========
+        # Teach the embeddings how to differentiate between different gates, but also similar gates
 
         B, num_gates = gate_positions.shape
-        horizon = cosine_similarity.shape[-1]
+
+        # Number of epochs to train without these hard examples
+        vae_horizon = cosine_similarity.shape[-1]
+
+        # Number of negative samples to train with + the real sample
+        N_INVALID = 2
+
+        # [B, N_INVALID, Horizon, 3]
+        trajectories = batch["trajectory"].unsqueeze(1).repeat(1, N_INVALID, 1, 1)
+
+        # Create negative samples where the x dimension is slightly shifted
+        # trajectories[:, 1, :, 0] += torch.tensor([random.uniform(0.2, 0.5) for _ in range(B)],
+        #                                          dtype=trajectories.dtype, device=trajectories.device).unsqueeze(1)
+
+        # # Create negative samples where the y dimension is slightly shifted
+        # trajectories[:, 2, :, 1] += torch.tensor([random.uniform(0.2, 0.5) for _ in range(B)],
+        #                                          dtype=trajectories.dtype, device=trajectories.device).unsqueeze(1)
+
+        # Create negative samples where the z dimension is flipped (i.e. gates at 0.3 are now at 0.525 and vice versa)
+        trajectories[:, 1, :, 2] = (0.525 + 0.3) - trajectories[:, 1, :, 2]
+
+        # [N_INVALID*B, Horizon, 3]
+        trajectories = trajectories.view(N_INVALID*B, -1, 3)
+
+        # [N_INVALID*B, VAE_Horizon, latent_dim]
+        trajectory_mu, _ = self.trajectory_encoder.encode(trajectories, padding=self.args[0].vae_padding)
+
+        # [B, N_INVALID, VAE_horizon, latent_dim]
+        trajectory_mu = trajectory_mu.view(B, N_INVALID, -1, self.args[2].latent_dim)
+
+        # [B, N_INVALID, N_gates, embed_dim]
+        course_embedding_expanded = course_embedding.unsqueeze(1).expand(-1, N_INVALID, -1, -1)
+
+        # [B, N_INVALID, N_gates, VAE_Horizon]
+        cosine_similarity = self.get_cosine_similarity(course_embedding_expanded, trajectory_mu) * \
+            torch.exp(-self.temperature)
+
+        # [B, N_INVALID * N_gates, VAE_Horizon]
+        cosine_similarity = cosine_similarity.reshape(B, -1, vae_horizon)
+
         # Fill target with no gate at every timestep
-        target = torch.full((B, horizon), -100, dtype=torch.long, device=cosine_similarity.device)
+        target = torch.full((B, vae_horizon), -100, dtype=torch.long, device=cosine_similarity.device)
         for b in range(B):
             for g in range(num_gates):
                 # Location along horizon where this gate is hit
                 h = int(gate_positions[b, g].item())
-                if h < horizon and target[b, h] == -100:
+                if h < vae_horizon and target[b, h] == -100:
                     target[b, h] = g
 
         # [B, VAE_horizon, N_gates]
@@ -189,17 +235,15 @@ class ContrastiveWrapper(nn.Module):
 
         col_loss: torch.Tensor = F.cross_entropy(pred, target, ignore_index=-100, reduction='mean')
 
-        # 4) Compute loss for each trajectory embedding vs gate embedding i
+        # ======== Combine both forms of loss ========
 
-        # Flatten target to [B * N_gates] and cosine_similarity to [B * N_gates, VAE horizon]
-        # TODO(shreepa): try training on a smoother probability distribution instead of class
-        target = gate_positions.reshape(-1)
-        pred = cosine_similarity.reshape(-1, cosine_similarity.size(-1))
+        if epoch < 100:
+            total_loss = 0.2 * col_loss + 0.8 * row_loss
+        elif epoch < 25:
+            total_loss = 0.9 * col_loss + 0.1 * row_loss
+        else:
+            total_loss = 0.5 * col_loss + 0.5 * row_loss
 
-        # 3) Compute the loss
-        row_loss = F.cross_entropy(pred, target, reduction='mean')
-
-        total_loss = 0.5 * col_loss + 0.5 * row_loss
         return {
             "loss": total_loss,
             "col_ce_loss": col_loss,

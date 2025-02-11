@@ -98,4 +98,4 @@ plt.show()
 
 
 # Example data
-render_simulation(drone_states, course, trajectory.as_ref_pos())
+render_simulation(drone_states, course, trajectory.as_ref_pos(), filename="test.mp4")

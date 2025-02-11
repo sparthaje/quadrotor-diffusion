@@ -4,12 +4,15 @@ import argparse
 import importlib
 
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
 
-from quadrotor_diffusion.models.diffusion import DiffusionWrapper
+from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.logging import dataclass_to_table
-
+from quadrotor_diffusion.utils.file import get_checkpoint_file
+from quadrotor_diffusion.utils.plotting import create_course_grid
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', required=True, help="Name of config file in configs/ without the .py")
@@ -32,11 +35,27 @@ print(dataclass_to_table(diff_args))
 print(dataclass_to_table(train_args))
 print("\n" + "="*100 + "\n")
 
-
-diff_model = DiffusionWrapper((diff_args, unet_args))
+diff_model = DiffusionWrapper((
+    diff_args,
+    unet_args,
+))
 trainer = Trainer(train_args, diff_model, dataset)
 
 trainer.test_forward_pass()
 print("\n" + "="*100 + "\n")
 
-trainer.train()
+N_epochs = train_args.max_epochs
+
+trainer.args.max_epochs = 0
+while trainer.epoch < N_epochs:
+    trainer.args.max_epochs += train_args.evaluate_every
+    trainer.train()
+
+    sample_trajectories = diff_model.sample_unguided(batch_size=10, horizon=360, device=train_args.device)
+    print(sample_trajectories.shape)
+    fig, axes = create_course_grid(sample_trajectories)
+
+    save_dir = os.path.join(trainer.args.log_dir, "samples", "training")
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(os.path.join(save_dir, f"{trainer.epoch}.pdf"))
+    plt.close(fig)

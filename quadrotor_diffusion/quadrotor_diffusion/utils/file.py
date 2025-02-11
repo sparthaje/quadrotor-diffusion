@@ -51,6 +51,35 @@ def get_checkpoint_file(train_dir: str, experiment_number: int, epoch=None):
     raise ValueError(f"Epoch {epoch} not found.")
 
 
+def get_sample_folder(train_dir: str, experiment_number: int):
+    """
+    Returns path to folder to save any new experiment samples to, creates teh folder as well
+
+    Args:
+        train_dir: log directory where all training data is (e.g. logs/training)
+        experiment_nubmer: The model number
+
+    Returns:
+        (str) directory to store all outputs in
+    """
+    model_dir = get_experiment_folder(train_dir, experiment_number)
+    exp_dir_base = os.path.join(train_dir, model_dir, "samples")
+    os.makedirs(exp_dir_base, exist_ok=True)
+
+    max_exp_num = 0
+    pattern = re.compile(rf"exp_(\d+)")
+    for entry in os.listdir(exp_dir_base):
+        match = pattern.match(entry)
+        if match:
+            e_value = int(match.group(1))
+            max_exp_num = max(max_exp_num, e_value)
+
+    exp_dir = os.path.join(exp_dir_base, f"exp_{max_exp_num + 1}")
+    os.makedirs(exp_dir)
+
+    return exp_dir
+
+
 def save_trajectory(filepath: str, pos: np.ndarray, vel: np.ndarray, acc: np.ndarray):
     """
     Saves a trajectory (set of commands) to a .trajectory.npy file

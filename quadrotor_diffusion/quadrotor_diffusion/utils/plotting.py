@@ -10,6 +10,7 @@ import matplotlib.patches as patches
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 from matplotlib.legend_handler import HandlerBase
 import numpy as np
+import torch
 from scipy.signal import savgol_filter
 
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
@@ -452,3 +453,35 @@ def add_trajectory_to_course(trajectory: Union[PolynomialTrajectory, np.ndarray]
         plt.plot(ref_pos[:, 0], ref_pos[:, 1], c='red', linewidth=2)
     else:
         plt.scatter(ref_pos[:, 0], ref_pos[:, 1], s=point_sizes, c=colors, marker='o', alpha=0.8)
+
+
+def create_course_grid(trajectories: torch.Tensor) -> tuple[plt.Figure, np.ndarray]:
+    """Creates a 2x5 grid of course plots with trajectories
+
+    Args:
+        trajectories (torch.Tensor): Tensor of shape (10, n, 3) containing trajectory data
+
+    Returns:
+        tuple[plt.Figure, np.ndarray]: Figure and array of axes
+    """
+    fig, axes = plt.subplots(2, 5, figsize=(40, 16))
+    axes_flat = axes.flatten()
+
+    for idx, (ax, trajectory) in enumerate(zip(axes_flat, trajectories)):
+        ax.set_xlim(-1.5, 1.5)
+        ax.set_ylim(-2, 2)
+        ax.set_aspect('equal')
+
+        ax.set_xticks(np.arange(-1.5, 1.6, 1))
+        ax.set_yticks(np.arange(-2, 2.1, 1))
+        ax.grid(which='both', linestyle='--', linewidth=0.5)
+
+        trajectory_np = trajectory.detach().cpu().numpy() if isinstance(trajectory, torch.Tensor) else trajectory
+
+        plt.sca(ax)
+        add_trajectory_to_course(trajectory_np)
+
+        ax.set_title(f'Trajectory {idx + 1}')
+
+    plt.tight_layout()
+    return fig, axes

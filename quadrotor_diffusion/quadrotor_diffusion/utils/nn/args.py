@@ -62,7 +62,7 @@ class VAE_DecoderArgs:
 class VAE_WrapperArgs:
     """
     loss: An nn.Module wrapper of a loss function (can be dynamic with learnable parameters)
-    Loss Params: whatever parameters are releavant to the internal reconstruction loss
+    Loss Params: whatever parameters are relevant to the internal reconstruction loss
     beta: How much to weight KL divergence
     """
     loss: str
@@ -76,6 +76,7 @@ class CourseEmbeddingArgs:
     n_layers: int
     embed_dim: int
     gate_input_dim: int
+    vae_padding: int
 
 
 @dataclass
@@ -96,6 +97,7 @@ class TrainerArgs:
     num_gpus: number of gpus to use (Default: -1 use all of them)
     device: device to train on
     max_epochs: number of epochs to stop at
+    evaluate_every: Train for this many epochs, evaluate the model, then return to training. Default = No evaluation
     """
 
     ema_decay: float
@@ -112,3 +114,4 @@ class TrainerArgs:
     num_gpus: int = -1
     device: str = 'cuda'
     max_epochs: int = None
+    evaluate_every: int = None

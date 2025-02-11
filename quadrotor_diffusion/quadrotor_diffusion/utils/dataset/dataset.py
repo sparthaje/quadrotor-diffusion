@@ -136,6 +136,63 @@ class QuadrotorFullStateDataset(Dataset):
         return data
 
 
+class QuadrotorRaceTrajectoryDataset(Dataset):
+    def __init__(self, data_dir: str, course_types: list[str], traj_len: int, normalizer: Normalizer):
+        """
+        Args:
+            data_dir (str): Root dir where course/linear, course/u, etc exists
+            course_types (list[str]): linear, u, etc.
+            traj_len (int): Trajectory length to pad to (i.e. 12s = 360 points)
+            normalizer (Normalizer): Normalizer for trajectory data
+        """
+
+        super().__init__()
+        self.data_dir = data_dir
+        self.course_types = course_types
+        self.normalizer = normalizer
+        self.traj_len = traj_len
+        self.data: list[str] = []
+        self._load_data()
+
+    def _load_data(self):
+        for course_type in self.course_types:
+            course_dir = os.path.join(self.data_dir, "courses", course_type)
+            if not os.path.isdir(course_dir):
+                continue
+
+            for sample in os.listdir(course_dir):
+                sample_dir = os.path.join(course_dir, sample)
+                if not os.path.isdir(sample_dir):
+                    continue
+
+                course_filename = os.path.join(sample_dir, "course.npy")
+                if not os.path.exists(course_filename):
+                    continue
+
+                # Find valid trajectories
+                valid_dir = os.path.join(sample_dir, "valid")
+                if os.path.exists(valid_dir):
+                    for valid_file in os.listdir(valid_dir):
+                        if valid_file.endswith(".pkl"):
+                            traj_filename = os.path.join(valid_dir, valid_file)
+
+                            # 1 for valid trajectory
+                            self.data.append(traj_filename)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        trajectory_filename = self.data[idx]
+        assert trajectory_filename.endswith(".pkl")
+
+        with open(trajectory_filename, "rb") as trajectory_file:
+            trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
+        trajectory = trajectory.as_ref_pos(pad_to=self.traj_len)
+        trajectory = self.normalizer(trajectory)
+        return torch.tensor(trajectory, dtype=torch.float32)
+
+
 def evaluate_dataset(dataset: Dataset):
     """
     Get key stats about a dataset
