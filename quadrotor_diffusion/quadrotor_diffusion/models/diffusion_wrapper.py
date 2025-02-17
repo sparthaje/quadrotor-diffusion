@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from quadrotor_diffusion.utils.nn.schedulers import cosine_beta_schedule
 from quadrotor_diffusion.models.losses import MSELoss, L1Loss
 from quadrotor_diffusion.models.temporal import Unet1D
-from quadrotor_diffusion.models.vae import VAE_Wrapper
+from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.models.contrastive_wrapper import ContrastiveWrapper
 from quadrotor_diffusion.utils.nn.args import (
     DiffusionWrapperArgs,
@@ -208,7 +208,8 @@ class LatentDiffusionWrapper(nn.Module):
 
         # If the trajectory is not divisible by the downsample factor, we need to pad it
         horizon_downsample_factor = 2 ** (len(self.args[1].channel_mults)-1)
-        padding = horizon_downsample_factor - latent_trajectory.shape[-2] % horizon_downsample_factor
+        horizon_modulo = latent_trajectory.shape[-2] % horizon_downsample_factor
+        padding = 0 if horizon_modulo == 0 else horizon_downsample_factor - horizon_modulo
 
         if padding > 0:
             pad_left: int = padding // 2

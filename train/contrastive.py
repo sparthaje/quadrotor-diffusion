@@ -5,7 +5,7 @@ import importlib
 
 import torch
 
-from quadrotor_diffusion.models.vae import VAE_Wrapper
+from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.models.contrastive_wrapper import ContrastiveWrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs, CourseEmbeddingArgs, VAE_WrapperArgs, VAE_EncoderArgs, VAE_DecoderArgs

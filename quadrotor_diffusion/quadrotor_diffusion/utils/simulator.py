@@ -1,3 +1,4 @@
+import enum
 import time
 import argparse
 import sys
@@ -135,17 +136,28 @@ def play_trajectory(ref_pos: np.ndarray,
         return True, states
 
 
-def render_simulation(drone_states: np.ndarray, course: list[np.array], reference: bool = None, filename: str = None):
+class SimulatorViewingAngle(enum.Enum):
+    """
+    Viewing angles for the simulator
+    """
+    BEV = 0
+    PERSPECTIVE = 1
+    YZ = 2
+
+
+def render_simulation(drone_states: np.ndarray, course: list[np.array], reference: np.ndarray = None, viewing_angle: SimulatorViewingAngle = SimulatorViewingAngle.PERSPECTIVE, filename: str = None):
     """
     Renders simulation data
 
     Args:
         drone_states (np.ndarray): [position, velocity, orientations]
         course (list[np.array]): list[x, y, z, theta]
-        reference (bool, optional): Reference trajectory drone is trying to track. Defaults to None.
+        reference (np.ndarray, optional): Reference trajectory drone is trying to track. Defaults to None.
+        viewing_angle (SimulatorViewingAngle, optional): Viewing angle to render. Defaults to SimulatorViewingAngle.PERSPECTIVE
         filename (str, optional): Filename to save mp4 to if nothing passed in will plt.show. Defaults to None.
     """
-    fig = plt.figure()
+    fig = plt.figure(figsize=(4, 4))
+    fig.subplots_adjust(0, 0, 1, 1)
     ax = fig.add_subplot(111, projection='3d')
 
     ax.axis('off')
@@ -212,7 +224,16 @@ def render_simulation(drone_states: np.ndarray, course: list[np.array], referenc
     if reference is not None:
         point_sizes, colors = get_render_map(drone_states[1], 8, 1)
         ax.scatter(reference[:, 0], reference[:, 1], reference[:, 2], s=point_sizes, c=colors, alpha=0.7)
-    ax.view_init(elev=25, azim=-145)
+
+    if viewing_angle == SimulatorViewingAngle.YZ:
+        ax.view_init(elev=0, azim=0)
+    elif viewing_angle == SimulatorViewingAngle.BEV:
+        ax.view_init(elev=90, azim=0)
+    elif viewing_angle == SimulatorViewingAngle.PERSPECTIVE:
+        ax.view_init(elev=25, azim=-145)
+    else:
+        raise ValueError("Unknown viewing angle")
+
     ax.dist = 2
 
     quadrotor_lines = []

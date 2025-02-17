@@ -29,14 +29,14 @@ course_embedding_args = CourseEmbeddingArgs(
     n_layers=3,
     embed_dim=128,
     gate_input_dim=4,
-    vae_padding=28,
+    vae_padding=0,
 )
 
-vae_experiment = 42
+vae_experiment = 102
 
 normalizer = NormalizerTuple(
     normalizer_a=NoNormalizer(),
     normalizer_b=NoNormalizer(),
 )
 
-dataset = ContrastiveEmbeddingDataset("data", ["linear", "u"], 360, normalizer)
+dataset = ContrastiveEmbeddingDataset("data", ["linear", "u"], 384, normalizer)

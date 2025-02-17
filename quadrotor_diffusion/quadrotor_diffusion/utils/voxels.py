@@ -127,7 +127,7 @@ def visualize_occupancy_map(occupancy_map: np.ndarray, voxel_size: float):
     plt.show()
 
 
-def collision_along_trajectory(ref_pos: np.ndarray, occupancy_map: np.ndarray, voxel_size: float) -> float:
+def collision_along_trajectory(ref_pos: np.ndarray, occupancy_map: np.ndarray, voxel_size: float) -> bool:
     """
     Returns True if ref_pos is too close to an occupied voxel
     """

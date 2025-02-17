@@ -17,7 +17,7 @@ from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTraje
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
 
-def plot_reference_time_series(save_path: str, title: str, reference, sim_states=None):
+def plot_reference_time_series(save_path: str, title: str, reference, observed=None):
     """
     Plots reference trajectory and optionally compares with simulated states.
 
@@ -25,7 +25,7 @@ def plot_reference_time_series(save_path: str, title: str, reference, sim_states
     - save_path: str, path where to save the plot
     - title: str, plot title
     - reference: numpy array [n x 3] where columns are [x, y, z] positions
-    - sim_states: Optional, same format as reference
+    - observed: Optional, same format as reference
     """
     time = np.arange(len(reference)) * 1/30
 
@@ -34,20 +34,20 @@ def plot_reference_time_series(save_path: str, title: str, reference, sim_states
     fig.suptitle(title)
 
     dimensions = ['x', 'y', 'z']
-    colors = ['blue', 'red', 'green']
+    colors = matplotlib.rcParams['axes.prop_cycle'].by_key()['color']
 
     for dim_idx in range(3):
         ax = axs[dim_idx]
 
         ax.plot(time, reference[:, dim_idx],
                 label='Reference',
-                color=colors[dim_idx], linestyle='--' if sim_states is not None else '-')
+                color=colors[dim_idx], linestyle='--' if observed is not None else '-', linewidth=3.5)
 
         # Plot simulation states if provided
-        if sim_states is not None:
-            ax.plot(time, sim_states[:, dim_idx],
-                    label='States in Sim',
-                    color=colors[dim_idx], linestyle='-')
+        if observed is not None:
+            ax.plot(time, observed[:, dim_idx],
+                    label='Observed',
+                    color=colors[dim_idx], linestyle='-', linewidth=3.5)
 
         ax.set_title(f'{dimensions[dim_idx]}')
         ax.set_xlabel('Time (s)')
@@ -127,18 +127,22 @@ def view_trajectories_in_3d(save_path: str, title: str, reference, sim_states=No
     return save_path
 
 
-def plot_loss_and_time(csv_file: str, losses: List[str]):
+def plot_loss_and_time(csv_file: str, losses: List[str], log_loss=False):
     # Read CSV file into a DataFrame
     df = pd.read_csv(csv_file)
+    # Make all keys lowercase
+    df.columns = [col.lower() for col in df.columns]
 
     # Get the directory of the CSV file
     dir_path = os.path.dirname(os.path.abspath(csv_file))
 
     plt.figure(figsize=(10, 5))
     for col in losses:
-        plt.plot(df['epoch'], df[col], label=col, linewidth=3.5)
+        if log_loss:
+            df[col.lower()] = np.log(df[col.lower()])
+        plt.plot(df['epoch'], df[col.lower()], label=col, linewidth=3.5)
     plt.xlabel('Epoch')
-    plt.ylabel('Loss')
+    plt.ylabel(f"{'Log ' if log_loss else ''}Loss")
     plt.title('Loss vs Epoch')
     plt.grid(True)
     plt.legend()
@@ -180,8 +184,8 @@ def plot_states(
     pos: np.ndarray,
     vel: np.ndarray,
     acc: np.ndarray,
-    plot_title: Union[str, None],
-    filename: Union[str, None],
+    plot_title: Union[str, None] = None,
+    filename: Union[str, None] = None,
 ):
     """
     Plot all dimensions of trajectory in 3x3 figure

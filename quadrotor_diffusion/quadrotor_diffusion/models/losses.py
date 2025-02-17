@@ -52,88 +52,48 @@ class L1Loss(nn.Module):
         }
 
 
-class SmoothWeightedL1(nn.Module):
-    def __init__(self, alpha, w_l, w_g, epsilon=1e-6):
-        super().__init__()
+class SmoothReconstructionLoss(nn.Module):
+
+    def __init__(self, reconstruction_loss: nn.Module, betas: list[float]):
         """
-        Computes a smooth L1 loss between prediction and target
-        Parameters:
-        - alpha: Sharpness around error=0
-        - w_l: Weighting for prediction magnitude less than target magnitude
-        - w_g: Weighting for prediction magnitude greater than target magnitude
-        - epsilon: Small constant for numerical stability near zero
+        Computes reconstruction loss for a curve and its derivatives.
+
+        Args:
+            reconstruction_loss (nn.Module): Reconstruction loss
+            betas (list[float]): For every beta i, the (i+1)th order derivative's loss is weighted by beta_i
         """
-        self.alpha = alpha
-        self.w_l = w_l
-        self.w_g = w_g
-        self.epsilon = epsilon
-
-    def forward(self, pred, targ):
-        """
-        Computes smooth weighted L1 loss based on absolute magnitude difference
-        Parameters:
-        - pred: network output [batch_size x horizon x states]
-        - targ: expected output [batch_size x horizon x states]
-        Returns:
-        - Loss dictionary containing total loss and component
-        """
-        pred_mag = torch.sqrt(pred * pred + self.epsilon)
-        targ_mag = torch.sqrt(targ * targ + self.epsilon)
-        mag_diff = pred_mag - targ_mag
-
-        weights = torch.sigmoid(self.alpha * mag_diff)
-        l1 = F.l1_loss(pred, targ, reduction='none')
-
-        # Compute weighted loss
-        loss = torch.mean(
-            self.w_g * weights * l1 +  # Higher weight when |pred| > |targ|
-            self.w_l * (1 - weights) * l1  # Lower weight when |pred| < |targ|
-        )
-
-        return {
-            "loss": loss,
-            "L1": torch.mean(l1),
-            "SmoothWeightedL1": loss,
-        }
-
-
-class SmoothnessLoss(nn.Module):
-
-    def __init__(self, reconstruction_loss: nn.Module, order: int):
         super().__init__()
         self.reconstruction_loss = reconstruction_loss
-        self.smoothness_weighting = nn.Parameter(torch.tensor(1.0))
-        self.recon_weighting = nn.Parameter(torch.tensor(1.0))
-        self.order = order
+        self.betas = betas
 
-    def forward(self, pred, target):
+    def forward(self, pred, target) -> dict[str, torch.Tensor]:
         """
         Computes the smoothness loss for a curve.
 
         Parameters
         - pred: network output [batch_size x horizon x states]
-        - targ: expected output [batch_size x horizon x states]
+        - target: expected output [batch_size x horizon x states]
 
         Returns:
         - Loss
         """
+        total_loss = self.reconstruction_loss(pred, target)["loss"]
 
-        diff = pred
-        for _ in range(self.order):
-            diff = diff[:, 1:, :] - diff[:, :-1, :]
+        recon_loss = dict()
+        recon_loss["recon"] = total_loss
 
-        smoothness_loss = torch.mean(diff ** 2)
-        recon_loss: dict = self.reconstruction_loss(pred, target)
+        diff_pred = pred[:, 1:, :] - pred[:, :-1, :]
+        diff_target = target[:, 1:, :] - target[:, :-1, :]
+        for i, beta in enumerate(self.betas):
+            nth_order_loss = self.reconstruction_loss(diff_pred, diff_target)["loss"]
+            recon_loss[f"recon_{i+2}"] = nth_order_loss
+            total_loss += beta * nth_order_loss
 
-        total_loss = self.recon_weighting * recon_loss["loss"] + \
-            0.01 * self.smoothness_weighting * smoothness_loss
+            # Compute next derivative (uniformly spaced points)
+            diff_pred = diff_pred[:, 1:, :] - diff_pred[:, :-1, :]
+            diff_target = diff_target[:, 1:, :] - diff_target[:, :-1, :]
 
-        recon_loss.update({
-            "loss": total_loss,
-            "s_recon_loss": recon_loss["loss"],
-            "smoothness_loss": smoothness_loss
-        })
-
+        recon_loss["loss"] = total_loss
         return recon_loss
 
 
@@ -144,9 +104,9 @@ class VAE_Loss(nn.Module):
         self.recon_loss = recon_loss
         self.beta = beta
 
-    def forward(self, pred: Tuple[torch.Tensor, torch.Tensor], target: torch.Tensor) -> torch.Tensor:
+    def forward(self, pred: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], target: torch.Tensor) -> dict[str, torch.Tensor]:
         """
-        Parameters
+        Args
         - pred: network output 
                 pred[0]: [batch_size x compressed_horizon x states] (mu)
                 pred[1]: [batch_size x compressed_horizon x states] (logvar)
@@ -172,8 +132,3 @@ class VAE_Loss(nn.Module):
         loss_dict["KL_Divergence"] = kl_loss
 
         return loss_dict
-
-        return {
-            "loss": loss,
-            "CrossEntropy": loss
-        }

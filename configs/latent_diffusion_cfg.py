@@ -7,20 +7,20 @@ from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, Normalize
 from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset
 
 unet_args = Unet1DArgs(
-    traj_dim=6,
-    features=128,
-    channel_mults=[1, 2, 4, 8],
+    traj_dim=12,
+    features=64,
+    channel_mults=[1, 2, 4],
     attentions=[
-        [False, False, False, False],
+        [False, False, False],
         [False],
-        [False, False, False]
+        [False, False]
     ]
 )
 
 diff_args = DiffusionWrapperArgs(
     predict_epsilon=True,
     loss="L1Loss",
-    n_timesteps=100,
+    n_timesteps=30,
     loss_params=None
 )
 
@@ -29,8 +29,8 @@ train_args = TrainerArgs(
     num_batches_no_ema=20,
     num_batches_per_ema=10,
 
-    batch_size_per_gpu=1024,
-    batches_per_backward=1,
+    batch_size_per_gpu=128,
+    batches_per_backward=4,
 
     log_dir="logs/training/",
     save_freq=5,
@@ -38,12 +38,12 @@ train_args = TrainerArgs(
     learning_rate=2e-4,
     num_gpus=1,
     device="cuda:2",
-    max_epochs=200,
-    evaluate_every=1
+    max_epochs=400,
+    evaluate_every=5
 )
 
-embedding_experiment = 79
+embedding_experiment = 107
 
 normalizer = NoNormalizer()
 
-dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 360, normalizer)
+dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 384, normalizer)

@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 
-from quadrotor_diffusion.models.vae import VAE_Wrapper
+from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.args import CourseEmbeddingArgs, VAE_WrapperArgs, VAE_EncoderArgs, VAE_DecoderArgs
 from quadrotor_diffusion.models.nn_blocks import soft_argmax, soft_argmin
 from quadrotor_diffusion.utils.logging import iprint as print
