@@ -6,6 +6,7 @@ import random
 
 import torch
 import matplotlib.pyplot as plt
+import wandb
 
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
@@ -17,6 +18,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', required=True, help="Name of config file in configs/ without the .py")
 parser.add_argument('-d', '--debug', action='store_true', help="Turn on debug mode.")
 args = parser.parse_args()
+
+wandb.login()
 
 os.environ['DEBUG'] = 'True' if args.debug else 'False'
 

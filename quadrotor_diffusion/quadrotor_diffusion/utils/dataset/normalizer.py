@@ -57,7 +57,7 @@ class LinearNormalizer(Normalizer):
         return array * self.scalers + self.biases
 
     def undo(self, scaled_array: np.array) -> np.array:
-        return scaled_array / self.scalers - self.biases
+        return (scaled_array - self.biases) / self.scalers
 
     def __str__(self):
         return f"ScalerNormalizer: scalers = {self.scalers}, biases = {self.biases}"

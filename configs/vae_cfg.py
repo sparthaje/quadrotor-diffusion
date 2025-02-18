@@ -17,11 +17,11 @@ train_args = TrainerArgs(
     log_dir="logs/training",
     save_freq=5,
 
-    learning_rate=2e-4,
+    learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:0",
+    device="cuda:3",
 
-    max_epochs=200,
+    max_epochs=400,
     evaluate_every=5,
 )
 
@@ -38,23 +38,15 @@ vae_args = VAE_WrapperArgs(
 encoder_args = VAE_EncoderArgs(
     3,
     12,
-    128,
-    (1, 2, 4, 8),
+    64,
+    (1, 2, 4),
 )
 
 decoder_args = VAE_DecoderArgs(
     3,
     12,
-    128,
-    (8, 4, 2, 1)
+    64,
+    (4, 2, 1)
 )
 
-z_max = 0.6
-z_min = 0.25
-z_range = z_max - z_min
-scale = 4
-m = 4 / z_range
-b = ((scale * -z_min) / z_range) - scale/2
-
-normalizer = LinearNormalizer(np.array([1.0, 1.0, m]), np.array([0.0, 0.0, b]))
 dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 360, NoNormalizer())

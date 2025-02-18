@@ -4,11 +4,13 @@ import time
 from datetime import datetime
 from typing import Tuple
 import warnings
+from dataclasses import asdict
 
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import tqdm
+import wandb
 
 import quadrotor_diffusion.utils.nn.ema as ema
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
@@ -32,6 +34,7 @@ class Trainer:
     ):
         """"
         Generalized trainer for any nn.Module that takes a list of dataclasses as arguments for initialization
+        Logs everything to wandb make sure you log in
 
         Parameters:
         - args: training hyperparameters
@@ -60,7 +63,13 @@ class Trainer:
         batch_size = args.batch_size_per_gpu * args.num_gpus
         self.train_data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         self.normalizer: Normalizer = dataset.normalizer
+
+        self.model_number = None
         self.create_log_dir()
+
+        self.wandb_run = None
+        self.wandb_init()
+
         self.epoch = 0
 
     @torch.no_grad()
@@ -148,6 +157,8 @@ class Trainer:
             with open(os.path.join(self.args.log_dir, "logs.csv"), "a") as f:
                 f.write(log_stmnt + "\n")
 
+            self.wandb_run.log(epoch_losses)
+
             self.epoch += 1
 
     def create_log_dir(self):
@@ -158,10 +169,11 @@ class Trainer:
 
         dirs = [d for d in os.listdir(self.args.log_dir) if os.path.isdir(os.path.join(self.args.log_dir, d))]
         max_num = max([int(d.split('.')[0]) for d in dirs if d.split('.')[0].isdigit()], default=0)
+        self.model_number = max_num + 1
 
         model_type: str = str(type(self.model.module) if type(self.model) == nn.DataParallel else type(self.model))
         model_type = model_type.split('.')[-1][:-2]
-        new_dir_name = f"{max_num + 1}.{model_type}.{date_str}"
+        new_dir_name = f"{self.model_number}.{model_type}.{date_str}"
         new_dir_path = os.path.join(self.args.log_dir, new_dir_name)
         os.makedirs(new_dir_path)
 
@@ -186,6 +198,27 @@ class Trainer:
             f.write(args_to_str(self.model.module) if self.multi_gpu else args_to_str(self.model))
             f.write(f"\nDataset: {str(self.train_data_loader.dataset)}\n")
             f.write(f"Normalization: {self.train_data_loader.dataset.normalizer}\n\n")
+
+    def wandb_init(self):
+        """
+        Initializes wandb project and save config
+        """
+
+        config = dict()
+        config["TrainerArgs"] = asdict(self.args)
+        model = self.model.module if self.multi_gpu else self.model
+        for arg in model.args:
+            arg_name = str(type(arg)).split(".")[-1][:-2]
+            config[arg_name] = asdict(arg)
+
+        model_type: str = str(type(self.model.module) if type(self.model) == nn.DataParallel else type(self.model))
+        model_type = model_type.split('.')[-1][:-2]
+        self.wandb_run = wandb.init(
+            project=model_type,
+            config=config,
+            entity="shreepa",
+            name=f"{self.model_number}"
+        )
 
     def save(self, epoch: int, loss: float):
         filename = os.path.join(self.args.log_dir, f"checkpoints/epoch_{epoch}_loss_{loss:.4f}")
