@@ -1,5 +1,5 @@
 import warnings
-from typing import Tuple
+from typing import Tuple, Callable
 
 import torch
 import torch.nn as nn
@@ -112,7 +112,7 @@ class DiffusionWrapper(nn.Module):
         return loss
 
     @torch.no_grad()
-    def sample_unguided(self, batch_size: int, horizon: int, device: str) -> torch.Tensor:
+    def sample(self, batch_size: int, horizon: int, device: str, guide: Callable[[torch.Tensor], torch.Tensor] = None) -> torch.Tensor:
         """
         Samples trajectories from pure noise using the reverse diffusion process
 
@@ -120,7 +120,8 @@ class DiffusionWrapper(nn.Module):
             batch_size: number of trajectories to generate
             horizon: length of each trajectory
             device: device for pytorch tensors
-
+            guide: Function that takes a trajectory (tensor) at each step and assigns a probability to it. The returning tensor's gradient will be used to guide diffusion. 
+                   This guide function should include the `s` scaling hyperparameter. If not provided, will sample unguided.
         Returns:
             x: Generated trajectories of shape [batch_size x horizon x traj_dim]
         """
@@ -138,9 +139,25 @@ class DiffusionWrapper(nn.Module):
             # Get model prediction (either epsilon or x_0)
             model_output = self.model(x_t, time_t)
 
+            if guide is not None:
+                with torch.enable_grad():
+                    x_t.requires_grad_(True)
+                    guide_score = guide(x_t)
+
+                    s = 2.3
+
+                    guide_score = s * torch.log(guide_score.requires_grad_())
+                    guide_score.backward()
+
+                    grad: torch.Tensor = x_t.grad
+                    grad = grad.detach()
+                    print(guide_score, grad.norm(p=2))
+
             # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
             if self.predict_epsilon:
-                x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * model_output) / torch.sqrt(alpha_bar_t)
+                sigma_t = torch.sqrt(1 - alpha_bar_t).reshape(-1, 1, 1)
+                eps = model_output - sigma_t * grad
+                x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * eps) / torch.sqrt(alpha_bar_t)
 
             # Otherwise just use predicted \hat{x_0}
             else:
@@ -155,11 +172,11 @@ class DiffusionWrapper(nn.Module):
             if t > 0:
                 noise = torch.randn_like(x_t)
                 posterior_variance = self.posterior_variance[t]
-                x_t = posterior_mean + torch.sqrt(posterior_variance) * noise
+                x_t = posterior_mean + grad + torch.sqrt(posterior_variance) * noise
             else:
                 x_t = posterior_mean
 
-        return x_t
+        return x_t.detach()
 
 
 class LatentDiffusionWrapper(nn.Module):
@@ -240,7 +257,7 @@ class LatentDiffusionWrapper(nn.Module):
         assert horizon % (vae_downsample * diffusion_downsample) == 0
 
         latent_horizon = horizon // vae_downsample
-        latent_trajectories = self.diffusion.sample_unguided(batch_size, latent_horizon, device)
+        latent_trajectories = self.diffusion.sample(batch_size, latent_horizon, device)
         trajectories = self.encoders.trajectory_encoder.decode(latent_trajectories)
 
         return trajectories

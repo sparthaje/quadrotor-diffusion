@@ -9,11 +9,11 @@ from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDat
 unet_args = Unet1DArgs(
     traj_dim=12,
     features=64,
-    channel_mults=[1, 2, 4],
+    channel_mults=[1, 2, 4, 8],
     attentions=[
-        [False, False, False],
+        [False, False, False, False],
         [False],
-        [False, False]
+        [False, False, False]
     ]
 )
 
@@ -35,9 +35,9 @@ train_args = TrainerArgs(
     log_dir="logs/training/",
     save_freq=5,
 
-    learning_rate=2e-4,
+    learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:2",
+    device="cuda:3",
     max_epochs=400,
     evaluate_every=5
 )

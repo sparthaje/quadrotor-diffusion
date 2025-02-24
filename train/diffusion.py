@@ -51,7 +51,7 @@ while trainer.epoch < N_epochs:
     trainer.args.max_epochs += train_args.evaluate_every
     trainer.train()
 
-    sample_trajectories = diff_model.sample_unguided(batch_size=10, horizon=360, device=train_args.device)
+    sample_trajectories = diff_model.sample(batch_size=10, horizon=360, device=train_args.device)
     print(sample_trajectories.shape)
     fig, axes = create_course_grid(sample_trajectories)
 

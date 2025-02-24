@@ -7,6 +7,7 @@ from functools import partial
 import sys
 from contextlib import contextmanager
 import os
+import subprocess
 
 import yaml
 import numpy as np
@@ -221,12 +222,15 @@ def render_simulation(drone_states: np.ndarray, course: list[np.array], referenc
         post = np.array(post)
         ax.plot(post[:, 0], post[:, 1], post[:, 2], 'black', linewidth=2)
 
+    # Prepare for reference trail (if needed)
+    trail_scatter = None
     if reference is not None:
         point_sizes, colors = get_render_map(drone_states[1], 8, 1)
-        ax.scatter(reference[:, 0], reference[:, 1], reference[:, 2], s=point_sizes, c=colors, alpha=0.7)
+        # Initialize an empty scatter plot for the trail
+        trail_scatter = ax.scatter([], [], [], s=[], c=[], alpha=0.7)
 
     if viewing_angle == SimulatorViewingAngle.YZ:
-        ax.view_init(elev=0, azim=0)
+        ax.view_init(elev=5, azim=0)
     elif viewing_angle == SimulatorViewingAngle.BEV:
         ax.view_init(elev=90, azim=0)
     elif viewing_angle == SimulatorViewingAngle.PERSPECTIVE:
@@ -279,13 +283,87 @@ def render_simulation(drone_states: np.ndarray, course: list[np.array], referenc
     position = drone_states[0]
     rpy_orientations = drone_states[2]
 
+    # For trail optimization, only add new points to existing trail
+    current_trail_length = 0
+
     def update(frame):
+        nonlocal current_trail_length
         x, y, z = position[frame, 0], position[frame, 1], position[frame, 2]
         roll, pitch = rpy_orientations[frame, 0], rpy_orientations[frame, 1]
         draw_quadrotor(x, y, z, roll, pitch)
+
+        # Update the reference trail efficiently - only add new points
+        if reference is not None and trail_scatter is not None:
+            # Only update if we have new points to add
+            if frame > current_trail_length:
+                # Get only the new points since last update
+                new_x = reference[current_trail_length:frame, 0]
+                new_y = reference[current_trail_length:frame, 1]
+                new_z = reference[current_trail_length:frame, 2]
+                new_sizes = point_sizes[current_trail_length:frame]
+                new_colors = colors[current_trail_length:frame]
+
+                # If this is the first update, create the scatter plot
+                if current_trail_length == 0:
+                    trail_scatter._offsets3d = (new_x, new_y, new_z)
+                    trail_scatter.set_sizes(new_sizes)
+                    trail_scatter.set_color(new_colors)
+                else:
+                    # Add new points to existing trail
+                    current_x, current_y, current_z = trail_scatter._offsets3d
+                    trail_scatter._offsets3d = (
+                        np.append(current_x, new_x),
+                        np.append(current_y, new_y),
+                        np.append(current_z, new_z)
+                    )
+                    trail_scatter.set_sizes(np.append(trail_scatter.get_sizes(), new_sizes))
+
+                    # For colors, we need to handle different color representations
+                    if isinstance(trail_scatter.get_facecolor(), np.ndarray):
+                        current_colors = trail_scatter.get_facecolor()
+                        new_colors_array = np.array([colors[i] for i in range(current_trail_length, frame)])
+                        trail_scatter.set_color(np.vstack((current_colors, new_colors_array)))
+                    else:
+                        # If not array, probably using a colormap
+                        trail_scatter.set_array(np.append(trail_scatter.get_array(),
+                                                          np.array(new_colors)))
+
+                # Update the current trail length
+                current_trail_length = frame
 
     ani = FuncAnimation(fig, update, frames=len(position), interval=1000 / 30, blit=False)
     if filename is not None:
         ani.save(filename, writer="ffmpeg")
     else:
         plt.show()
+    plt.close()
+
+
+def create_perspective_rendering(drone_states: np.ndarray, course: list[np.array], filename: str, reference: np.ndarray = None):
+    """
+    Creates three views of the simulation data
+
+    Args:
+        drone_states (np.ndarray): [position, _velocity, _orientation]
+        course (list[np.array]): [[x, y, z, theta]]
+        filename (str): Filename to save to
+        reference (np.ndarray, optional): Reference trajectory to follow. Defaults to None.
+    """
+    # extract directory of filename
+    base_dir = os.path.dirname(filename)
+
+    bev = os.path.join(base_dir, "bev.mp4")
+    perspective = os.path.join(base_dir, "perspective.mp4")
+    yz = os.path.join(base_dir, "yz.mp4")
+
+    render_simulation(drone_states, course, None, SimulatorViewingAngle.BEV, filename=bev)
+    render_simulation(drone_states, course, None, SimulatorViewingAngle.YZ, filename=yz)
+    render_simulation(drone_states, course, reference, SimulatorViewingAngle.PERSPECTIVE, filename=perspective)
+
+    with suppress_output():
+        subprocess.run(["ffmpeg", "-i", bev, "-i", perspective, "-i", yz,
+                        "-filter_complex", "hstack=inputs=3", filename], check=True, stdout=subprocess.DEVNULL)
+
+    os.remove(bev)
+    os.remove(perspective)
+    os.remove(yz)

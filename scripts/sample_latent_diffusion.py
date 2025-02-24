@@ -4,33 +4,23 @@ import sys
 import argparse
 import time
 
-import matplotlib.pyplot as plt
 import numpy as np
-import torch
+import tqdm
 
 from quadrotor_diffusion.utils.nn.training import Trainer
-from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper
+from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
 from quadrotor_diffusion.utils.logging import iprint as print
-from quadrotor_diffusion.utils.plotting import (
-    plot_states,
-    plot_ref_obs_states,
-    course_base_plot,
-    add_gates_to_course,
-    add_trajectory_to_course
-)
-from quadrotor_diffusion.utils.simulator import play_trajectory, create_perspective_rendering
+from quadrotor_diffusion.utils.plotting import plot_states,  plot_ref_obs_states
+from quadrotor_diffusion.utils.simulator import play_trajectory, render_simulation
 from quadrotor_diffusion.utils.file import get_checkpoint_file, get_sample_folder
 from quadrotor_diffusion.utils.nn.post_process import fit_to_recon
-from quadrotor_diffusion.utils.file import load_course_trajectory
-from quadrotor_diffusion.guide_functions.baseline import compute_trajectory_alignment
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-e', '--experiment', type=int, help='Experiment number', required=True)
 
 parser.add_argument('-s', '--samples', type=int, help='Number of trajectories to generate', required=True)
-parser.add_argument('-c', '--course', type=str, help='Sample (course_type,course_number)', default="")
 parser.add_argument('-o', '--horizon', type=int, help='Horizon', required=True)
 
 parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is biggest', default=None)
@@ -54,19 +44,10 @@ with open(os.path.join(sample_dir, "overview.txt"), "w") as f:
         f"Device: {args.device}\n"
     )
 
-model: DiffusionWrapper = None
-ema: DiffusionWrapper = None
+model: LatentDiffusionWrapper = None
+ema: LatentDiffusionWrapper = None
 normalizer: Normalizer = None
 trainer_args: TrainerArgs = None
-
-guide_function = None
-course_npy = []
-if args.course != "":
-    sample_info = args.course.split(",")
-    course_npy, _, _ = load_course_trajectory(sample_info[0], sample_info[1], 0)
-    course = torch.tensor(course_npy, dtype=torch.float32).to(args.device)
-    course = course.expand(args.samples, -1, -1)
-    def guide_function(trajectory): return compute_trajectory_alignment(trajectory, course)
 
 diff, ema, normalizer, trainer_args = Trainer.load(chkpt)
 print(f"Loaded {chkpt}")
@@ -75,7 +56,7 @@ print(f"Using {normalizer}")
 
 model.to(args.device)
 start = time.time()
-trajectories = model.sample(args.samples, args.horizon, args.device, guide=guide_function)
+trajectories = model.sample(args.samples, args.horizon, args.device)
 print(f"{time.time() - start:.2f} seconds to generate {args.samples} samples with {args.device}")
 
 for i in range(trajectories.size(0)):
@@ -89,13 +70,6 @@ for i in range(trajectories.size(0)):
         os.path.join(sample_dir, f"traj_{i}.pdf")
     )
 
-    _, ax = course_base_plot()
-    if guide_function is not None:
-        add_gates_to_course(course_npy, ax)
-    add_trajectory_to_course(pos, velocity_profile=vel)
-    plt.savefig(os.path.join(sample_dir, f"sample_{i}_bev.pdf"))
-    plt.close()
-
     worked, states = play_trajectory(pos, vel, acc)
     if not worked:
         print("Failed")
@@ -107,13 +81,12 @@ for i in range(trajectories.size(0)):
         os.path.join(sample_dir, f"traj_{i}_sim.pdf")
     )
 
-    create_perspective_rendering(states, course_npy, reference=pos,
-                                 filename=os.path.join(sample_dir, f"sample_{i}.mp4"))
+    render_simulation(states, [], reference=pos, filename=os.path.join(sample_dir, f"sample_{i}.mp4"))
 
-N = 1000
+N = 20
 if args.time_it:
     start = time.time()
-    for _ in range(N):
+    for _ in tqdm.tqdm(range(N)):
         trajectories = model.sample(1, args.horizon, args.device)
     end = time.time() - start
     print(f"{end / N:.2f} seconds on avg to generate 1 sample with {args.device}")

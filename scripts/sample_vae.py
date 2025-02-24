@@ -1,3 +1,4 @@
+import time
 import subprocess
 import os
 from random import randint
@@ -26,6 +27,7 @@ parser.add_argument('-e', '--experiment', type=int, help='Experiment number', re
 parser.add_argument('-s', '--sample', type=str, help='Sample (course_type,course_number,sample_number)', required=True)
 parser.add_argument('-r', '--no-fit', action='store_true', help="Replay raw reconstructed data without post-processing")
 parser.add_argument('-a', '--padding', type=int, default=0, help="Padding to use for encoding / decoding")
+parser.add_argument('-t', '--time_it', action='store_true', help="Time the diffusion process")
 
 parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is biggest', default=None)
 parser.add_argument('-d', '--device', type=str, help='Device to use', default="cuda")
@@ -122,3 +124,13 @@ add_trajectory_to_course(fitted[0], velocity_profile=fitted[1])
 add_trajectory_to_course(ref_pos, reference=True)
 trajectory_fig_filename = os.path.join(sample_dir, "trajectories.pdf")
 plt.savefig(trajectory_fig_filename)
+
+N = 1000
+if args.time_it:
+    start = time.time()
+    for _ in range(N):
+        trajectory = torch.randn(
+            (1, 384 // (2**(len(model.args[1].channel_mults) - 1)), model.args[1].latent_dim)).to(args.device)
+        _ = model.decode(trajectory)
+    end = time.time() - start
+    print(f"{end / N:.4f} seconds on avg to decode 1 sample with {args.device}")
