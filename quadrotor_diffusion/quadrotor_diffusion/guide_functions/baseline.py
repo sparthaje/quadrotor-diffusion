@@ -92,21 +92,27 @@ def compute_trajectory_alignment(trajectory: torch.Tensor, course: torch.Tensor)
     # 1) drop the last column in course tensor to make it [B, N_gates, 3]
     course = course[..., :3]
 
-    # 2) Compute a field where high values indicate being on "course"
-    distance_field, vol_bounds = create_distance_field(course, cell_size=0.05)
-    distance_field = torch.exp(-distance_field)
+    scores = []
+    for idx in range(course.shape[-2] - 1):
+        segment = course[..., idx:idx+2, :]
 
-    # 3) Adjust trajectory to use grid_sample
-    x_min, x_max, y_min, y_max, z_min, z_max = vol_bounds
-    traj_normalized = trajectory.clone()
-    traj_normalized[..., 0] = 2 * (traj_normalized[..., 0] - x_min) / (x_max - x_min) - 1
-    traj_normalized[..., 1] = 2 * (traj_normalized[..., 1] - y_min) / (y_max - y_min) - 1
-    traj_normalized[..., 2] = 2 * (traj_normalized[..., 2] - z_min) / (z_max - z_min) - 1
-    grid = traj_normalized.view(trajectory.shape[0], trajectory.shape[1], 1, 1, 3)
+        # 2) Compute a field where high values indicate being on "course"
+        distance_field, vol_bounds = create_distance_field(segment, cell_size=0.05)
+        distance_field = torch.exp(-distance_field)
 
-    # 3) use F.grid_sample to compute a (B, H) tensor of distances from each point on the horizon to the course
-    sampled = F.grid_sample(distance_field, grid, align_corners=True, mode='bilinear')
-    probability_of_alignment = sampled.squeeze(1).squeeze(-1).squeeze(-1)
+        # 3) Adjust trajectory to use grid_sample
+        x_min, x_max, y_min, y_max, z_min, z_max = vol_bounds
+        traj_normalized = trajectory.clone()
+        traj_normalized[..., 0] = 2 * (traj_normalized[..., 0] - x_min) / (x_max - x_min) - 1
+        traj_normalized[..., 1] = 2 * (traj_normalized[..., 1] - y_min) / (y_max - y_min) - 1
+        traj_normalized[..., 2] = 2 * (traj_normalized[..., 2] - z_min) / (z_max - z_min) - 1
+        grid = traj_normalized.view(trajectory.shape[0], trajectory.shape[1], 1, 1, 3)
+
+        # 3) use F.grid_sample to compute a (B, H) tensor of distances from each point on the horizon to the course
+        sampled = F.grid_sample(distance_field, grid, align_corners=True, mode='bilinear')
+        probability_of_alignment = sampled.squeeze(1).squeeze(-1).squeeze(-1)
+        score = torch.mean(probability_of_alignment, dim=-1)
+        scores.append(score)
 
     # 4) Return mean scores
-    return torch.mean(probability_of_alignment, dim=-1)
+    return sum(scores) / (len(scores) + 2)

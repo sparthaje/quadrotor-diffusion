@@ -132,3 +132,30 @@ class VAE_Loss(nn.Module):
         loss_dict["KL_Divergence"] = kl_loss
 
         return loss_dict
+
+
+class SymmetricLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred: torch.Tensor) -> dict[str, torch.Tensor]:
+        """
+        Args:
+            - pred: [M x M]
+
+        Returns:
+            - Loss
+        """
+        M, _ = pred.shape
+
+        targets = torch.arange(M, device=pred.device)
+        loss_row = F.cross_entropy(pred, targets)
+        loss_col = F.cross_entropy(pred.t(), targets)
+        loss = 0.5 * loss_row + 0.5 * loss_col
+
+        return {
+            "loss": loss,
+            "row_loss": loss_row,
+            "col_loss": loss_col,
+            "symmetric": loss,
+        }

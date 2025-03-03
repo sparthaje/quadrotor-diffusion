@@ -78,15 +78,23 @@ start = time.time()
 trajectories = model.sample(args.samples, args.horizon, args.device, guide=guide_function)
 print(f"{time.time() - start:.2f} seconds to generate {args.samples} samples with {args.device}")
 
+# course_npy[2][1] += 0.4
+# course[0][2][1] += 0.4
+# def guide_function(trajectory): return compute_trajectory_alignment(trajectory, course)
+
+
+# trajectories_adjusted = model.noise_and_resample(trajectories, 500, guide_function)
+
 for i in range(trajectories.size(0)):
     sampled = trajectories[i].cpu().numpy()
 
     pos, vel, acc = fit_to_recon(sampled, 30)
+    # pos_old, _, _ = fit_to_recon(trajectories[i].cpu().numpy(), 30)
 
     plot_states(
         pos, vel, acc,
         f"Sample {i} / {trajectories.size(0)}",
-        os.path.join(sample_dir, f"traj_{i}.pdf")
+        os.path.join(sample_dir, f"sample_{i}.pdf")
     )
 
     _, ax = course_base_plot()
@@ -96,6 +104,13 @@ for i in range(trajectories.size(0)):
     plt.savefig(os.path.join(sample_dir, f"sample_{i}_bev.pdf"))
     plt.close()
 
+    # _, ax = course_base_plot()
+    # if guide_function is not None:
+    #     add_gates_to_course(course_npy, ax)
+    # add_trajectory_to_course(pos_old, velocity_profile=vel)
+    # plt.savefig(os.path.join(sample_dir, f"sample_no_adj_{i}_bev.pdf"))
+    # plt.close()
+
     worked, states = play_trajectory(pos, vel, acc)
     if not worked:
         print("Failed")
@@ -104,7 +119,7 @@ for i in range(trajectories.size(0)):
         pos, vel, acc,
         states[0], states[1], states[1],
         f"Sample {i} / {trajectories.size(0)}",
-        os.path.join(sample_dir, f"traj_{i}_sim.pdf")
+        os.path.join(sample_dir, f"sample_{i}_sim.pdf")
     )
 
     create_perspective_rendering(states, course_npy, reference=pos,

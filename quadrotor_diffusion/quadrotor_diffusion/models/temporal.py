@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import einops
-from einops.layers.torch import Rearrange
+from einops.layers.torch import Rearrange, Reduce
 
 from quadrotor_diffusion.models.nn_blocks import (
     SinusoidalPosEmb,
@@ -78,12 +78,29 @@ class Unet1D(nn.Module):
             "Attentions must have 3 subarrays for down scale, mid, upscale with appropriate number of bools"
 
         # Projects sinusoidal embeddings into number of features
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(features),
-            nn.Linear(features, 4 * features),
-            nn.Mish(),
-            nn.Linear(4 * features, features)
-        )
+        if args.context_mlp == "time":
+            self.time_mlp = nn.Sequential(
+                SinusoidalPosEmb(features),
+                nn.Linear(features, 4 * features),
+                nn.Mish(),
+                nn.Linear(4 * features, features)
+            )
+
+        # Network tries to learn how to embed waypoints for this UNET
+        elif args.context_mlp == "waypoints":
+            self.time_mlp = nn.Sequential(
+                nn.Linear(4, 4*features),
+                nn.Conv1d(4*features, 8*features, kernel_size=5, stride=1, padding=2),
+                nn.MaxPool1d(kernel_size=2),
+                nn.Mish(),
+                nn.Conv1d(8*features, 4*features, kernel_size=5, stride=1, padding=2),
+                nn.Linear(4*features, features),
+                nn.Mish(),
+                nn.Linear(features, features),
+                Reduce("b n c -> b c", reduction="mean")
+            )
+        else:
+            raise ValueError("Unknown context")
 
         # Number of channels in each layer from top down in the Unet
         dims = [traj_dim] + [features * m for m in channel_mults]
@@ -132,7 +149,8 @@ class Unet1D(nn.Module):
     def forward(self, x, t):
         """
         x: [batch_size x horizon x traj_dim]
-        t: [batch size]
+        t: if context_mlp == "time" [batch size]
+           if context_mlp == "waypoints" [batch size x N_gates x 3]
         """
 
         x = einops.rearrange(x, "b h t -> b t h")

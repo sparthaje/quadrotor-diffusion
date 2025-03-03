@@ -1,5 +1,8 @@
 import os
 import pickle
+import random
+import copy
+from collections import defaultdict
 
 import numpy as np
 import torch
@@ -8,25 +11,31 @@ from torch.utils.data import Dataset
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer, NormalizerTuple
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
+from quadrotor_diffusion.utils.logging import iprint as print
 
 
-class ContrastiveEmbeddingDataset(Dataset):
-    def __init__(self, data_dir: str, course_types: list[str], traj_len: int, normalizer: NormalizerTuple):
+class CourseTrajectoryCrossEmbedding(Dataset):
+    def __init__(self, data_dir: str, course_types: list[str], traj_len: int, mini_batch_size: int, normalizer: NormalizerTuple):
         """
         Args:
             data_dir (str): Root dir where course/linear, course/u, etc exists
             course_types (list[str]): linear, u, etc.
             traj_len (int): Trajectory length to pad to (i.e. 12s = 360 points)
+            mini_batch_size (int): How many pairs to include in each mini-batch
             normalizer (NormalizerTuple): Normalizer for course and trajectory data
         """
-
         super().__init__()
         self.data_dir = data_dir
         self.course_types = course_types
         self.normalizer = normalizer
         self.traj_len = traj_len
-        self.data: list[tuple[str, str]] = []
+        self.data: dict[str, list[str]] = defaultdict(list)
         self._load_data()
+        self.mini_batches: list[list[tuple[str, str]]] = []
+        self.mini_batch_size = mini_batch_size
+        self._create_mini_batches(copy.deepcopy(self.data))
+        self.length = len(self.mini_batches)
+        self._current_idx = 0
 
     def _load_data(self):
         for course_type in self.course_types:
@@ -49,36 +58,63 @@ class ContrastiveEmbeddingDataset(Dataset):
                     for valid_file in os.listdir(valid_dir):
                         if valid_file.endswith(".pkl"):
                             traj_filename = os.path.join(valid_dir, valid_file)
+                            self.data[course_filename].append(traj_filename)
 
-                            # 1 for valid trajectory
-                            self.data.append((course_filename, traj_filename))
+    def _create_mini_batches(self, data):
+        self.mini_batches = []
+        courses = list(data.keys())
+
+        # Randomize the data order
+        random.shuffle(courses)
+        for c in courses:
+            random.shuffle(data[c])
+
+        while len(courses) > self.mini_batch_size:
+            mini_batch = []
+
+            mini_batch_courses = random.sample(courses, self.mini_batch_size)
+            for mini_batch_course in mini_batch_courses:
+                traj_idx = random.randint(0, len(data[mini_batch_course]) - 1)
+                trajectory = data[mini_batch_course][traj_idx]
+                del data[mini_batch_course][traj_idx]
+                mini_batch.append((mini_batch_course, trajectory))
+
+            self.mini_batches.append(mini_batch)
+            courses = [c for c in courses if len(data[c]) > 0]
 
     def __len__(self):
-        return len(self.data)
+        return self.length
 
     def __getitem__(self, idx):
-        course_filename, trajectory_filename = self.data[idx]
-        assert trajectory_filename.endswith(".pkl")
+        mini_batch = self.mini_batches[idx]
+        courses = [
+            self.normalizer.normalizer_a(torch.tensor(np.load(pair[0]), dtype=torch.float32).unsqueeze(0))
+            for pair in mini_batch
+        ]
+        courses = torch.concat(courses)
 
-        course = np.array(np.load(course_filename))
+        trajectories = []
+        for _, traj_filename in mini_batch:
+            with open(traj_filename, "rb") as trajectory_file:
+                trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
+            trajectory = trajectory.as_ref_pos(pad_to=self.traj_len)
+            trajectories.append(self.normalizer.normalizer_b(
+                torch.tensor(trajectory, dtype=torch.float32).unsqueeze(0)))
+        trajectories = torch.concat(trajectories)
 
-        with open(trajectory_filename, "rb") as trajectory_file:
-            trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
-        trajectory = trajectory.as_ref_pos(pad_to=self.traj_len)
-
-        # Find positions along the trajectory where each gate is passed
-        gate_positions = []
-        for gate in course:
-            gate_xyz = gate[:3]
-            idx = np.linalg.norm(trajectory - gate_xyz, axis=1).argmin(0)
-            gate_positions.append(idx)
-
-        course, trajectory = self.normalizer(course, trajectory)
-        return {
-            "course": torch.tensor(course, dtype=torch.float32),
-            "trajectory": torch.tensor(trajectory, dtype=torch.float32),
-            "gate_positions": torch.tensor(gate_positions, dtype=torch.int64),
+        sample = {
+            "courses": courses,
+            "trajectories": trajectories,
         }
+
+        self._current_idx += 1
+        if self._current_idx >= len(self.mini_batches):
+            self._current_idx = 0
+            self.mini_batches = []
+            self._create_mini_batches(copy.deepcopy(self.data))
+            print("Resetting Mini Batches")
+
+        return sample
 
 
 class QuadrotorTrajectoryDataset(Dataset):

@@ -9,7 +9,6 @@ from quadrotor_diffusion.utils.nn.schedulers import cosine_beta_schedule
 from quadrotor_diffusion.models.losses import MSELoss, L1Loss
 from quadrotor_diffusion.models.temporal import Unet1D
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
-from quadrotor_diffusion.models.contrastive_wrapper import ContrastiveWrapper
 from quadrotor_diffusion.utils.nn.args import (
     DiffusionWrapperArgs,
     Unet1DArgs,
@@ -141,16 +140,31 @@ class DiffusionWrapper(nn.Module):
 
             if guide is not None:
                 with torch.enable_grad():
+                    # grads = []
+                    # scores = []
+                    # for idx in range(x_t.shape[0]):
+                    #     sample_x = x_t[idx]
+                    #     print(sample_x.shape)
+                    #     sample_x.requires_grad_(True)
+                    #     score = guide(sample_x)
+                    #     score.backward()
+                    #     grads.append(
+                    #         sample_x.grad.detach()
+                    #     )
+                    #     scores.append(score.detach())
+                    # grad = torch.concat(grads, dim=0)
+
                     x_t.requires_grad_(True)
                     guide_score = guide(x_t)
 
-                    s = 2.3
+                    s = 2.6
 
-                    guide_score = s * torch.log(guide_score.requires_grad_())
+                    guide_score = torch.sum(s * torch.log(guide_score))
                     guide_score.backward()
 
                     grad: torch.Tensor = x_t.grad
                     grad = grad.detach()
+
                     print(guide_score, grad.norm(p=2))
 
             # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
@@ -162,6 +176,74 @@ class DiffusionWrapper(nn.Module):
             # Otherwise just use predicted \hat{x_0}
             else:
                 x_0_hat = model_output
+
+            # Compute posterior mean
+            c1 = (torch.sqrt(alpha_bar_t_prev) * beta_t) / (1.0 - alpha_bar_t)
+            c2 = (torch.sqrt(alpha_t) * (1.0 - alpha_bar_t_prev)) / (1.0 - alpha_bar_t)
+            posterior_mean = c1 * x_0_hat + c2 * x_t
+
+            # Add noise if not the final step
+            if t > 0:
+                noise = torch.randn_like(x_t)
+                posterior_variance = self.posterior_variance[t]
+                x_t = posterior_mean + grad + torch.sqrt(posterior_variance) * noise
+            else:
+                x_t = posterior_mean
+
+        return x_t.detach()
+
+    @torch.no_grad()
+    def noise_and_resample(self, x_0: torch.Tensor, noise_t: int, guide: Callable[[torch.Tensor], torch.Tensor]) -> torch.Tensor:
+        """
+        Take a sample, noise it up by t timesteps, and apply guide function for t timesteps in reverse process
+
+        Args:
+            x_0 (torch.Tensor): Cleaned sample
+            noise_t (int): Amount of timesteps to noise/denoise for
+            guide (Callable[[torch.Tensor], torch.Tensor], optional): Guide function see previous method for the full definition. Defaults to None.
+
+        Returns:
+            torch.Tensor: New trajectory
+        """
+
+        epsilon = torch.randn_like(x_0)
+
+        # Unsqueeze alpha_bar so it goes from [1] to [1 x 1 x 1] allowing for broadcasting
+        alpha_t = self.alpha_bar[noise_t].unsqueeze(-1).unsqueeze(-1)
+        x_t = torch.sqrt(alpha_t) * x_0 + torch.sqrt(1 - alpha_t) * epsilon
+
+        # Iteratively denoise the samples
+        for t in range(noise_t, -1, -1):
+            time_t = torch.ones(x_0.shape[0], device=x_0.device).long() * t
+            beta_t = self.betas[t]
+            alpha_t = self.alpha[t]
+            alpha_bar_t = self.alpha_bar[t]
+            alpha_bar_t_prev = self.alpha_bar[t - 1] if t > 0 else torch.tensor(1.0, device=x_0.device)
+
+            # Get model prediction (either epsilon or x_0)
+            model_output = self.model(x_t, time_t)
+
+            with torch.enable_grad():
+                x_t.requires_grad_(True)
+                guide_score = guide(x_t)
+
+                s = 3.5
+
+                guide_score = s * torch.log(guide_score.requires_grad_())
+                guide_score.backward()
+
+                grad: torch.Tensor = x_t.grad
+                grad = grad.detach()
+                print(guide_score, grad.norm(p=2))
+
+            # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
+            if self.predict_epsilon:
+                sigma_t = torch.sqrt(1 - alpha_bar_t).reshape(-1, 1, 1)
+                eps = model_output - sigma_t * grad
+                x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * eps) / torch.sqrt(alpha_bar_t)
+
+            else:
+                raise ValueError("Can't guide if not predicting epsilon")
 
             # Compute posterior mean
             c1 = (torch.sqrt(alpha_bar_t_prev) * beta_t) / (1.0 - alpha_bar_t)

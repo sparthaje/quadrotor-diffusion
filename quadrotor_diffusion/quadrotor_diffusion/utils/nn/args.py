@@ -9,11 +9,13 @@ class Unet1DArgs:
     features: Base number of features to project traj_dim to
     channel_mults: How to scale up the channels as horizon gets down scaled, e.g. [1, 2, 4, 8]
     attentions: Whether or not to put a linear attention between the resnet blocks
+    context_mlp: "time" for diffusion models, "waypoints" for latent classifier model
     """
     traj_dim: int
     features: int
     channel_mults: List[int]
     attentions: List[List[bool]]
+    context_mlp: str = "time"
 
 
 @dataclass
