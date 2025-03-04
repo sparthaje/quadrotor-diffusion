@@ -2,26 +2,30 @@
 
 import numpy as np
 
-from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
+from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, NormalizerTuple
 from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset
 
 unet_args = Unet1DArgs(
     traj_dim=12,
-    features=64,
-    channel_mults=[1, 2, 4, 8],
+    features=128,
+    channel_mults=[1, 2, 4],
     attentions=[
-        [False, False, False, False],
-        [False],
-        [False, False, False]
-    ]
+        [False, False, False],
+        [True],
+        [False, False]
+    ],
+    context_mlp="time",
+    conditioning=True
 )
 
-diff_args = DiffusionWrapperArgs(
+diff_args = LatentDiffusionWrapperArgs(
     predict_epsilon=True,
     loss="L1Loss",
-    n_timesteps=30,
-    loss_params=None
+    n_timesteps=100,
+    loss_params=None,
+    dropout=0.2,
+    conditioning_shape=(6, 4)
 )
 
 train_args = TrainerArgs(
@@ -39,11 +43,11 @@ train_args = TrainerArgs(
     num_gpus=1,
     device="cuda:3",
     max_epochs=400,
-    evaluate_every=5
+    evaluate_every=5,
 )
 
-embedding_experiment = 107
+vae_experiment = 102
 
 normalizer = NoNormalizer()
 
-dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 384, normalizer)
+dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 384, normalizer, True)

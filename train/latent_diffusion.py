@@ -8,9 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
-from quadrotor_diffusion.models.contrastive_wrapper import ContrastiveWrapper
+from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
-from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
+from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.logging import dataclass_to_table
 from quadrotor_diffusion.utils.file import get_checkpoint_file
 from quadrotor_diffusion.utils.plotting import create_course_grid
@@ -24,17 +24,20 @@ os.environ['DEBUG'] = 'True' if args.debug else 'False'
 
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(root_dir)
-config_module = importlib.import_module(f'configs.{args.config}')
+cfg_name = args.config if "_cfg" in args.config else args.config + "_cfg"
+config_module = importlib.import_module(f'configs.{cfg_name}')
 
 unet_args: Unet1DArgs = config_module.unet_args
-diff_args: DiffusionWrapperArgs = config_module.diff_args
+diff_args: LatentDiffusionWrapperArgs = config_module.diff_args
 train_args: TrainerArgs = config_module.train_args
 dataset: torch.utils.data.Dataset = config_module.dataset
 
 # Load pre-trained embeddings
-embedding_experiment: int = config_module.embedding_experiment
-chkpt = get_checkpoint_file("logs/training", embedding_experiment)
-contrastive_wrapper, _, _, _ = Trainer.load(chkpt, get_ema=False)
+vae_experiment: int = config_module.vae_experiment
+chkpt = get_checkpoint_file("logs/training", vae_experiment)
+vae_wrapper: VAE_Wrapper = None
+vae_wrapper, _, _, _ = Trainer.load(chkpt, get_ema=False)
+vae_wrapper.to(train_args.device)
 
 print(dataclass_to_table(unet_args))
 print(dataclass_to_table(diff_args))
@@ -44,12 +47,9 @@ print("\n" + "="*100 + "\n")
 diff_model = LatentDiffusionWrapper((
     diff_args,
     unet_args,
-    contrastive_wrapper.args[1],
-    contrastive_wrapper.args[2],
-    contrastive_wrapper.args[3],
-    contrastive_wrapper.args[0],
 ))
-diff_model.encoders = contrastive_wrapper
+diff_model.encoder = vae_wrapper.encode
+diff_model.decoder = vae_wrapper.decode
 trainer = Trainer(train_args, diff_model, dataset)
 
 trainer.test_forward_pass()
@@ -62,7 +62,15 @@ while trainer.epoch < N_epochs:
     trainer.args.max_epochs += train_args.evaluate_every
     trainer.train()
 
-    sample_trajectories = diff_model.sample(batch_size=10, horizon=dataset[0].shape[0], device=train_args.device)
+    vae_downsample = 2 ** (len(vae_wrapper.args[1].channel_mults) - 1)
+    sampling_model: LatentDiffusionWrapper = trainer.ema_model if trainer.ema_model is not None else diff_model
+    sample_trajectories = sampling_model.sample(
+        batch_size=10,
+        horizon=dataset[0]["trajectory"].shape[0],
+        vae_downsample=vae_downsample,
+        device=train_args.device,
+        conditioning=None,
+    )
     fig, axes = create_course_grid(sample_trajectories)
 
     save_dir = os.path.join(trainer.args.log_dir, "samples", "training")

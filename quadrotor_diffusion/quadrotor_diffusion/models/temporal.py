@@ -11,6 +11,8 @@ from quadrotor_diffusion.models.nn_blocks import (
 )
 from quadrotor_diffusion.models.attention import (
     LinearAttention,
+    LinearCrossAttention,
+    CrossAttention,
     PreNorm,
     Residual
 )
@@ -21,7 +23,7 @@ from quadrotor_diffusion.utils.logging import iprint as print
 class ResNet1DBlock(nn.Module):
     def __init__(self, c_in, c_out, t_embed_dim, kernel_size=5):
         """
-        Resdiual block for 1D data inspried by Stable Diffusion
+        Residual block for 1D data inspired by Stable Diffusion
         """
         super().__init__()
 
@@ -126,6 +128,15 @@ class Unet1D(nn.Module):
             ResNet1DBlock(c_mid, c_mid, t_embed_dim=features)
         ])
 
+        self.conditioning = None
+        if args.conditioning:
+            self.conditioning_embedding = nn.Sequential(
+                nn.Linear(4, c_mid // 2),
+                nn.Mish(),
+                nn.Linear(c_mid // 2, c_mid),
+            )
+            self.conditioning = Residual(PreNorm(c_mid, CrossAttention(c_mid, c_mid)))
+
         # Up layers which scales horizon up by factors of 2^(len(channels_mult))
         self.ups = nn.ModuleList([])
         dims_up = list(reversed(dims[1:]))
@@ -146,11 +157,12 @@ class Unet1D(nn.Module):
             nn.Conv1d(features, traj_dim, kernel_size=1)
         )
 
-    def forward(self, x, t):
+    def forward(self, x, t, c=None):
         """
         x: [batch_size x horizon x traj_dim]
         t: if context_mlp == "time" [batch size]
            if context_mlp == "waypoints" [batch size x N_gates x 3]
+        c: conditioning [batch_size, N_gates, 4]
         """
 
         x = einops.rearrange(x, "b h t -> b t h")
@@ -167,6 +179,16 @@ class Unet1D(nn.Module):
         resnet0, attention, resnet1 = self.middle
         x = resnet0(x, t)
         x = attention(x)
+
+        if c is not None and self.conditioning is not None:
+            c = self.conditioning_embedding(c)
+            c = einops.rearrange(c, 'b n f -> b f n')
+            x = self.conditioning(x, c)
+        elif c is not None and self.conditioning is None:
+            raise ValueError("Need conditioning passed in")
+        elif c is None and self.conditioning is not None:
+            raise ValueError("Need conditioning in arguments")
+
         x = resnet1(x, t)
 
         for resnet0, resnet1, attention, upsample in self.ups:

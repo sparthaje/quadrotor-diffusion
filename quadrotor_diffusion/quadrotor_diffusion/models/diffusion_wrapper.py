@@ -1,4 +1,5 @@
 import warnings
+import random
 from typing import Tuple, Callable
 
 import torch
@@ -12,10 +13,7 @@ from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.args import (
     DiffusionWrapperArgs,
     Unet1DArgs,
-    VAE_WrapperArgs,
-    VAE_EncoderArgs,
-    VAE_DecoderArgs,
-    CourseEmbeddingArgs,
+    LatentDiffusionWrapperArgs,
 )
 from quadrotor_diffusion.utils.logging import dataclass_to_table, iprint as print
 
@@ -102,8 +100,8 @@ class DiffusionWrapper(nn.Module):
             alpha_t = self.alpha_bar[t].unsqueeze(-1).unsqueeze(-1)
             x_t = torch.sqrt(alpha_t) * x_0 + torch.sqrt(1 - alpha_t) * epsilon
 
-        model_output = self.model(x_t, t)
-        # TODO(shreepa): add ability to train inpainting by fixing specific points in traj to inpaitned vals
+        c = None if "conditioning" not in kwargs else kwargs["conditioning"]
+        model_output = self.model(x_t, t, c)
 
         target = epsilon if self.predict_epsilon else x_0
         loss = self.loss(model_output, target)
@@ -111,7 +109,7 @@ class DiffusionWrapper(nn.Module):
         return loss
 
     @torch.no_grad()
-    def sample(self, batch_size: int, horizon: int, device: str, guide: Callable[[torch.Tensor], torch.Tensor] = None) -> torch.Tensor:
+    def sample(self, batch_size: int, horizon: int, device: str, guide: Callable[[torch.Tensor], torch.Tensor] = None, conditioning=None) -> torch.Tensor:
         """
         Samples trajectories from pure noise using the reverse diffusion process
 
@@ -119,8 +117,9 @@ class DiffusionWrapper(nn.Module):
             batch_size: number of trajectories to generate
             horizon: length of each trajectory
             device: device for pytorch tensors
-            guide: Function that takes a trajectory (tensor) at each step and assigns a probability to it. The returning tensor's gradient will be used to guide diffusion. 
+            guide: Function that takes a trajectory (tensor) at each step and assigns a probability to it. The returning tensor's gradient will be used to guide diffusion.
                    This guide function should include the `s` scaling hyperparameter. If not provided, will sample unguided.
+            conditioning: If the model is trained to use conditioning pass in the conditioning to the model. Default none = no passed on data
         Returns:
             x: Generated trajectories of shape [batch_size x horizon x traj_dim]
         """
@@ -136,30 +135,16 @@ class DiffusionWrapper(nn.Module):
             alpha_bar_t_prev = self.alpha_bar[t - 1] if t > 0 else torch.tensor(1.0, device=device)
 
             # Get model prediction (either epsilon or x_0)
-            model_output = self.model(x_t, time_t)
+            model_output = self.model(x_t, time_t, conditioning)
 
             if guide is not None:
-                with torch.enable_grad():
-                    # grads = []
-                    # scores = []
-                    # for idx in range(x_t.shape[0]):
-                    #     sample_x = x_t[idx]
-                    #     print(sample_x.shape)
-                    #     sample_x.requires_grad_(True)
-                    #     score = guide(sample_x)
-                    #     score.backward()
-                    #     grads.append(
-                    #         sample_x.grad.detach()
-                    #     )
-                    #     scores.append(score.detach())
-                    # grad = torch.concat(grads, dim=0)
+                assert self.predict_epsilon
 
+                with torch.enable_grad():
                     x_t.requires_grad_(True)
                     guide_score = guide(x_t)
 
-                    s = 2.6
-
-                    guide_score = torch.sum(s * torch.log(guide_score))
+                    guide_score = torch.sum(torch.log(guide_score))
                     guide_score.backward()
 
                     grad: torch.Tensor = x_t.grad
@@ -167,10 +152,13 @@ class DiffusionWrapper(nn.Module):
 
                     print(guide_score, grad.norm(p=2))
 
-            # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
-            if self.predict_epsilon:
                 sigma_t = torch.sqrt(1 - alpha_bar_t).reshape(-1, 1, 1)
                 eps = model_output - sigma_t * grad
+            else:
+                eps = model_output
+
+            # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
+            if self.predict_epsilon:
                 x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * eps) / torch.sqrt(alpha_bar_t)
 
             # Otherwise just use predicted \hat{x_0}
@@ -186,7 +174,12 @@ class DiffusionWrapper(nn.Module):
             if t > 0:
                 noise = torch.randn_like(x_t)
                 posterior_variance = self.posterior_variance[t]
-                x_t = posterior_mean + grad + torch.sqrt(posterior_variance) * noise
+                if guide is not None:
+                    input("This is not right..., need 2 fix")
+                    x_t = posterior_mean + grad + torch.sqrt(posterior_variance) * noise
+                else:
+                    x_t = posterior_mean + torch.sqrt(posterior_variance) * noise
+
             else:
                 x_t = posterior_mean
 
@@ -265,63 +258,54 @@ class LatentDiffusionWrapper(nn.Module):
     def __init__(
         self,
         args: Tuple[
-            DiffusionWrapperArgs,
+            LatentDiffusionWrapperArgs,
             Unet1DArgs,
-            VAE_WrapperArgs,
-            VAE_EncoderArgs,
-            VAE_DecoderArgs,
-            CourseEmbeddingArgs
         ],
     ):
         super().__init__()
 
         self.args = args
-        self.diffusion = DiffusionWrapper((self.args[0], self.args[1]))
-        self.encoders = ContrastiveWrapper((args[5], args[2], args[3], args[4]))
+        self.diffusion = DiffusionWrapper((
+            DiffusionWrapperArgs(
+                predict_epsilon=args[0].predict_epsilon,
+                loss=args[0].loss,
+                loss_params=args[0].loss_params,
+                n_timesteps=args[0].n_timesteps
+            ),
+            self.args[1],
+        ))
+        self.null_token = nn.Parameter(5 * torch.ones(args[0].conditioning_shape))
+        self.encoder: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] = None
+        self.decoder: Callable[[torch.Tensor], torch.Tensor] = None
 
-    def encode_trajectory(self, trajectory: torch.Tensor) -> torch.Tensor:
-        """
-        Encode trajectory using VAE
-
-        Args:
-            trajectory (torch.Tensor): [B, Horizon, 3]
-
-        Returns:
-            torch.Tensor: [B, VAE_latent_horizon, vae_latent_dim]
-        """
-        return self.encoders.trajectory_encoder.encode(trajectory, padding=self.args[5].vae_padding)
-
-    def compute_loss(self, trajectory: torch.Tensor, **kwargs) -> torch.Tensor:
+    def compute_loss(self, batch: dict[str, torch.Tensor], **kwargs) -> torch.Tensor:
         """
         Compute loss for the given trajectory
         Args:
-            trajectory (torch.Tensor): [B, Horizon, 3]
+            batch:
+                - trajectory (torch.Tensor): [B, Horizon, 3]
+                - course (torch.Tensor): [B, 6, 4]
             kwargs (dict): Capture any additional arguments
 
         Returns:
             torch.Tensor: Loss value
         """
+        assert self.encoder is not None, "Encoder has not been set"
 
         # [B, Horizon // 4, VAE_latent_dim]
-        latent_trajectory, _ = self.encode_trajectory(trajectory)
+        latent_trajectory, _ = self.encoder(batch["trajectory"])
+
+        mask = torch.rand(batch["course"].shape[0], device=batch["course"].device) < self.args[0].dropout
+        batch["course"][mask] = self.null_token
 
         # If the trajectory is not divisible by the downsample factor, we need to pad it
         horizon_downsample_factor = 2 ** (len(self.args[1].channel_mults)-1)
         horizon_modulo = latent_trajectory.shape[-2] % horizon_downsample_factor
-        padding = 0 if horizon_modulo == 0 else horizon_downsample_factor - horizon_modulo
-
-        if padding > 0:
-            pad_left: int = padding // 2
-            pad_right: int = padding - pad_left
-            latent_trajectory = F.pad(latent_trajectory, (0, 0, pad_left, pad_right), mode='replicate')
-
-            if "debug" in kwargs:
-                print(f"Padding applied to the trajectory: {latent_trajectory.shape}, adjust VAE padding argument")
-
-        return self.diffusion.compute_loss(latent_trajectory)
+        assert horizon_modulo == 0, f"Invalid input data not divisible has module: {horizon_modulo}"
+        return self.diffusion.compute_loss(latent_trajectory, conditioning=batch["course"])
 
     @torch.no_grad()
-    def sample(self, batch_size: int, horizon: int, device: str) -> torch.Tensor:
+    def sample(self, batch_size: int, horizon: int, vae_downsample: int, device: str, conditioning: torch.Tensor = None) -> torch.Tensor:
         """
         1. Samples latents from pure noise using the reverse diffusion process.
         2. Decodes latents using the VAE decoder.
@@ -329,17 +313,22 @@ class LatentDiffusionWrapper(nn.Module):
         Parameters:
             batch_size: number of trajectories to generate
             horizon: length of each trajectory. must be divisible by 4 (VAE) * 8 (diffusion) = 32
+            vae_downsample: What factor VAE downsample the trajectory
             device: device for pytorch tensors
+            conditioning: Set of waypoints given as [batch_size x 6 x 4] if None will use the null token
 
         Returns:
             x: Generated trajectories of shape [batch_size x horizon x traj_dim]
         """
-        vae_downsample = 2 ** (len(self.args[3].channel_mults) - 1)
+        assert self.decoder is not None, "Need to attach a decoder"
+
         diffusion_downsample = 2 ** (len(self.args[1].channel_mults) - 1)
         assert horizon % (vae_downsample * diffusion_downsample) == 0
 
         latent_horizon = horizon // vae_downsample
-        latent_trajectories = self.diffusion.sample(batch_size, latent_horizon, device)
-        trajectories = self.encoders.trajectory_encoder.decode(latent_trajectories)
+        conditioning = conditioning.unsqueeze(0) if conditioning is not None else self.null_token.unsqueeze(0)
+        conditioning = conditioning.expand(batch_size, -1, -1)
+        latent_trajectories = self.diffusion.sample(batch_size, latent_horizon, device, conditioning=conditioning)
+        trajectories = self.decoder(latent_trajectories)
 
         return trajectories

@@ -19,7 +19,7 @@ class LayerNorm(nn.Module):
         self.g = nn.Parameter(torch.ones(1, dim, 1))
         self.b = nn.Parameter(torch.zeros(1, dim, 1))
 
-    def forward(self, x):
+    def forward(self, x, *args):
         var = torch.var(x, dim=1, unbiased=False, keepdim=True)
         mean = torch.mean(x, dim=1, keepdim=True)
         return (x - mean) / (var + self.eps).sqrt() * self.g + self.b
@@ -31,9 +31,9 @@ class PreNorm(nn.Module):
         self.fn = fn
         self.norm = LayerNorm(dim)
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         x = self.norm(x)
-        return self.fn(x)
+        return self.fn(x, *args, **kwargs)
 
 
 class LinearAttention(nn.Module):
@@ -55,4 +55,93 @@ class LinearAttention(nn.Module):
 
         out = torch.einsum('b h d e, b h d n -> b h e n', context, q)
         out = einops.rearrange(out, 'b h c d -> b (h c) d')
+        return self.to_out(out)
+
+
+class LinearCrossAttention(nn.Module):
+    def __init__(self, input_dim: int, conditioning_dim: int, heads: int = 4, dim_head: int = 32) -> None:
+        """
+        Linearized Cross Attention: input attends to conditioning
+
+        Args:
+            input_dim (int): Channels in input
+            conditioning_dim (int): Channels in conditioning
+            heads (int, optional): Attention Heads. Defaults to 4.
+            dim_head (int, optional): Channels per head. Defaults to 32.
+        """
+        super().__init__()
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+        hidden_dim = dim_head * heads
+        self.to_q = nn.Conv1d(input_dim, hidden_dim, 1, bias=False)
+        self.to_kv = nn.Conv1d(conditioning_dim, hidden_dim * 2, 1, bias=False)
+        self.to_out = nn.Conv1d(hidden_dim, input_dim, 1)
+
+    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        # E: embeddings pace
+        # S: sequence length
+        # H: number of heads
+
+        # [B, H*E, S_i]
+        q = self.to_q(x)
+        # [B, H*E, S_c]
+        k, v = self.to_kv(c).chunk(2, dim=1)
+
+        # [B, H, E, S]
+        q, k, v = map(lambda t: einops.rearrange(t, 'b (h c) d -> b h c d', h=self.heads), (q, k, v))
+        q = q * self.scale
+
+        # [B, H, E, E]
+        k = k.softmax(dim=-1)
+        context = torch.einsum('b h d n, b h e n -> b h d e', k, v)
+
+        # [B, H, E, S_i] -> [B, H*E, S_i]
+        out = torch.einsum('b h d e, b h d n -> b h e n', context, q)
+        out = einops.rearrange(out, 'b h c d -> b (h c) d')
+
+        return self.to_out(out)
+
+
+class CrossAttention(nn.Module):
+    def __init__(self, input_dim: int, conditioning_dim: int, heads: int = 4, dim_head: int = 32) -> None:
+        """
+        Linearized Cross Attention: input attends to conditioning
+
+        Args:
+            input_dim (int): Channels in input
+            conditioning_dim (int): Channels in conditioning
+            heads (int, optional): Attention Heads. Defaults to 4.
+            dim_head (int, optional): Channels per head. Defaults to 32.
+        """
+        super().__init__()
+
+        self.scale = dim_head ** -0.5
+        self.heads = heads
+        hidden_dim = dim_head * heads
+        self.to_q = nn.Conv1d(input_dim, hidden_dim, 1, bias=False)
+        self.to_kv = nn.Conv1d(conditioning_dim, hidden_dim * 2, 1, bias=False)
+        self.to_out = nn.Conv1d(hidden_dim, input_dim, 1)
+
+    def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        # E: embeddings pace
+        # S: sequence length
+        # H: number of heads
+
+        # [B, H*E, S_i]
+        q = self.to_q(x)
+        # [B, H*E, S_c]
+        k, v = self.to_kv(c).chunk(2, dim=1)
+
+        # [B, H, E, S]
+        q, k, v = map(lambda t: einops.rearrange(t, 'b (h c) d -> b h c d', h=self.heads), (q, k, v))
+
+        # Compute attention weighting between q and k, [B, H, S_i, S_c]
+        attention = torch.einsum('b h d n, b h d m -> b h n m', q, k)
+        attention *= self.scale
+        attention = attention.softmax(dim=-1)
+
+        # [B, H, E, S_i] -> [B, H*E, S_i]
+        out = torch.einsum('b h n m, b h d m -> b h d n', attention, v)
+        out = einops.rearrange(out, 'b h c d -> b (h c) d')
+
         return self.to_out(out)

@@ -37,6 +37,7 @@ parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is bi
 parser.add_argument('-d', '--device', type=str, help='Device to use', default="cuda")
 parser.add_argument('-m', '--no-ema', action='store_true', help="Use normal model instead of ema model.")
 parser.add_argument('-t', '--time_it', action='store_true', help="Time the diffusion process")
+parser.add_argument('-r', '--test_adj', action='store_true', help="Test adjusting one gate")
 
 args = parser.parse_args()
 sys.argv = [sys.argv[0]]
@@ -66,7 +67,8 @@ if args.course != "":
     course_npy, _, _ = load_course_trajectory(sample_info[0], sample_info[1], 0)
     course = torch.tensor(course_npy, dtype=torch.float32).to(args.device)
     course = course.expand(args.samples, -1, -1)
-    def guide_function(trajectory): return compute_trajectory_alignment(trajectory, course)
+    s = 2.4
+    def guide_function(trajectory): return s * compute_trajectory_alignment(trajectory, course)
 
 diff, ema, normalizer, trainer_args = Trainer.load(chkpt)
 print(f"Loaded {chkpt}")
@@ -78,18 +80,20 @@ start = time.time()
 trajectories = model.sample(args.samples, args.horizon, args.device, guide=guide_function)
 print(f"{time.time() - start:.2f} seconds to generate {args.samples} samples with {args.device}")
 
-# course_npy[2][1] += 0.4
-# course[0][2][1] += 0.4
-# def guide_function(trajectory): return compute_trajectory_alignment(trajectory, course)
+if args.test_adj:
+    course_npy[2][1] += 0.4
+    course[0][2][1] += 0.4
+    def guide_function(trajectory): return s * compute_trajectory_alignment(trajectory, course)
+    trajectories_adjusted = model.noise_and_resample(trajectories, 500, guide_function)
+    trajectories, trajectories_old = trajectories_adjusted, trajectories
 
-
-# trajectories_adjusted = model.noise_and_resample(trajectories, 500, guide_function)
 
 for i in range(trajectories.size(0)):
     sampled = trajectories[i].cpu().numpy()
 
     pos, vel, acc = fit_to_recon(sampled, 30)
-    # pos_old, _, _ = fit_to_recon(trajectories[i].cpu().numpy(), 30)
+    if args.test_adj:
+        pos_old, _, _ = fit_to_recon(trajectories_old[i].cpu().numpy(), 30)
 
     plot_states(
         pos, vel, acc,
@@ -104,12 +108,13 @@ for i in range(trajectories.size(0)):
     plt.savefig(os.path.join(sample_dir, f"sample_{i}_bev.pdf"))
     plt.close()
 
-    # _, ax = course_base_plot()
-    # if guide_function is not None:
-    #     add_gates_to_course(course_npy, ax)
-    # add_trajectory_to_course(pos_old, velocity_profile=vel)
-    # plt.savefig(os.path.join(sample_dir, f"sample_no_adj_{i}_bev.pdf"))
-    # plt.close()
+    if args.test_adj:
+        _, ax = course_base_plot()
+        if guide_function is not None:
+            add_gates_to_course(course_npy, ax)
+        add_trajectory_to_course(pos_old, velocity_profile=vel)
+        plt.savefig(os.path.join(sample_dir, f"sample_no_adj_{i}_bev.pdf"))
+        plt.close()
 
     worked, states = play_trajectory(pos, vel, acc)
     if not worked:

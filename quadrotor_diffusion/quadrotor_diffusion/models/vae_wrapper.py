@@ -226,7 +226,7 @@ class VAE_Wrapper(nn.Module):
         return loss
 
     @torch.no_grad()
-    def encode(self, x: torch.Tensor, padding=0):
+    def encode(self, x: torch.Tensor, padding=0) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Encode input to latent distribution
 
@@ -243,7 +243,7 @@ class VAE_Wrapper(nn.Module):
         return self.encoder(x)
 
     @torch.no_grad()
-    def decode(self, z, padding=0):
+    def decode(self, z, padding=0) -> torch.Tensor:
         """
         Decode latent vectors to time series
         Parameters:
