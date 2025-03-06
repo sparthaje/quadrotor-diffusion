@@ -132,7 +132,7 @@ def collision_along_trajectory(ref_pos: np.ndarray, occupancy_map: np.ndarray, v
     Returns True if ref_pos is too close to an occupied voxel
     """
     DRONE_SIZE = 0.1
-    SAFETY_MARGIN = 0.1
+    SAFETY_MARGIN = 0.05
 
     for row in ref_pos:
         min_distance = distance_to_nearest_obstacle(occupancy_map, *row, voxel_size)

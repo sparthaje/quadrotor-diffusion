@@ -369,9 +369,9 @@ def add_gates_to_course(course: list[np.array], ax: plt.Axes):
         ax.add_patch(left_circle)
         ax.add_patch(right_circle)
 
-        # arrow = patches.FancyArrow(0, 0, 0, 0.05, width=0.02, head_width=0.05,
-        #                            head_length=0.05, color='black', transform=t + ax.transData)
-        # ax.add_patch(arrow)
+        arrow = patches.FancyArrow(0, 0, 0, 0.05, width=0.02, head_width=0.05,
+                                   head_length=0.05, color='black', transform=t + ax.transData)
+        ax.add_patch(arrow)
 
     starting_face_color = 'black' if course[0][2] == 0.525 else 'white'
     ending_face_color = 'black' if course[-1][2] == 0.525 else 'white'
@@ -436,6 +436,10 @@ def add_trajectory_to_course(trajectory: Union[PolynomialTrajectory, np.ndarray]
         ref_pos = trajectory
     ref_vel = derive_trajectory(ref_pos, ctrl_freq=30) if velocity_profile is None else velocity_profile
 
+    MIN_POINT_SIZE = 5
+    MAX_POINT_SIZE = 125
+    point_sizes, colors = get_render_map(ref_vel, MAX_POINT_SIZE, MIN_POINT_SIZE)
+
     # This code shows where a trajectory violates GV limits
     # ref_acc = derive_trajectory(ref_vel, ctrl_freq=30)
     # colors = []
@@ -448,10 +452,6 @@ def add_trajectory_to_course(trajectory: Union[PolynomialTrajectory, np.ndarray]
     #         continue
 
     #     colors.append('blue')
-
-    MIN_POINT_SIZE = 5
-    MAX_POINT_SIZE = 125
-    point_sizes, colors = get_render_map(ref_vel, MAX_POINT_SIZE, MIN_POINT_SIZE)
 
     if reference:
         plt.plot(ref_pos[:, 0], ref_pos[:, 1], c='red', linewidth=2)

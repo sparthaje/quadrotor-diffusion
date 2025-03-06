@@ -6,7 +6,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 
-from quadrotor_diffusion.utils.simulator import play_trajectory, course_list_to_gate_list, render_simulation
+from quadrotor_diffusion.utils.simulator import play_trajectory, course_list_to_gate_list, create_perspective_rendering
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
 from quadrotor_diffusion.utils.trajectory import compute_tracking_error, derive_trajectory
 from quadrotor_diffusion.utils.plotting import (
@@ -31,6 +31,7 @@ args = parser.parse_args()
 base_dir = os.path.join(os.path.join(args.base_dir, args.course_type), args.sample_number)
 course_filename = os.path.join(base_dir, 'course.npy')
 course = np.load(course_filename)
+course = np.vstack((course, course[1]))
 
 if args.invalid:
     invalid_dir = os.path.join(base_dir, "invalid")
@@ -53,7 +54,13 @@ if len(trajectory_filename) != 1:
 trajectory_filename = os.path.join(valid_dir, trajectory_filename[0])
 with open(trajectory_filename, "rb") as trajectory_file:
     trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
-
+    trajectory.states.append(trajectory.states[2])
+    trajectory.segment_lengths.append(trajectory.segment_lengths[1])
+    trajectory.states.append(trajectory.states[3])
+    trajectory.segment_lengths.append(trajectory.segment_lengths[2])
+    trajectory.states.append(trajectory.states[4])
+    trajectory.segment_lengths.append(trajectory.segment_lengths[3])
+    trajectory.states.append(trajectory.states[5])
 
 _, ax = course_base_plot()
 add_gates_to_course(course, ax)
@@ -98,4 +105,4 @@ plt.show()
 
 
 # Example data
-render_simulation(drone_states, course, trajectory.as_ref_pos(), filename="test.mp4")
+create_perspective_rendering(drone_states, course, "test.mp4", trajectory.as_ref_pos())

@@ -93,6 +93,9 @@ class BoundarySamplingStrategy(enum.Enum):
     # Sample a new velocity / acceleration normal to the gate only if previous velocity was zero
     NEW_NORMAL_VELOCITY_AND_ACCEL = 4
 
+    # Use a given gate_idx
+    USE_EXISTING_STATE = 5
+
 
 def add_next_gate(course: list[np.array],
                   gate_idx: int,
@@ -100,8 +103,10 @@ def add_next_gate(course: list[np.array],
                   time_bounds: tuple[float, float],
                   trajectories_prev: list[PolynomialTrajectory],
                   strategies: list[BoundarySamplingStrategy],
+                  last_gate: bool,
                   check_traj_direction: bool = False,
-                  num_segments: int = None) -> list[PolynomialTrajectory]:
+                  num_segments: int = None,
+                  use_curve: bool = True) -> list[PolynomialTrajectory]:
     """
     Adds the gate_idx to list of potential trajectories
 
@@ -114,8 +119,10 @@ def add_next_gate(course: list[np.array],
     - time_bounds (tuple[float, float]): Upper and Lower bound for time segments for previous gate to current
     - trajectories_prev (list[PolynomialTrajectory]): List of all trajectories that go from starting point to gate_idx - 1
     - strategies: List of strategies to try for sampling
+    - last_gate (bool): Will run sim and evaluate
     - check_traj_direction: Evaluate if velocity points towards gate
     - num_segments: num_segments_to_sample hard override if not None
+    - use_curve (bool): Use the defined GV curve
 
     Returns:
     - list[PolynomialTrajectory]: List all of all trajectories that go from starting point to gate_idx
@@ -164,14 +171,19 @@ def add_next_gate(course: list[np.array],
 
                     accel_mag = np.random.uniform(0.8, 1.2)
                     acceleration = spherical_to_cartesian(accel_mag, vel_theta, vel_psi)
-                elif strategy == BoundarySamplingStrategy.NEW_NORMAL_VELOCITY_AND_ACCEL and np.linalg.norm(previous_velocity) < 0.1:
+                elif strategy == BoundarySamplingStrategy.NEW_NORMAL_VELOCITY_AND_ACCEL:
                     vel_mag = np.random.uniform(vel_bounds[0], vel_bounds[1])
                     vel_theta, vel_psi = random_vel_direction(
                         gate_idx, course, use_gate_normal_theta=True)
                     velocity = spherical_to_cartesian(vel_mag, vel_theta, vel_psi)
 
-                    accel_mag = np.random.uniform(0.8, 1.2)
+                    accel_mag = 0.0  # np.random.uniform(0.8, 1.2) if np.linalg.norm(previous_velocity) < 0.1 else 0.0
                     acceleration = spherical_to_cartesian(accel_mag, vel_theta, vel_psi)
+                elif strategy == BoundarySamplingStrategy.USE_EXISTING_STATE:
+                    current_state = copy.deepcopy(new_trajectory.states[gate_idx])
+                    velocity = np.array([current_state.x.v, current_state.y.v, current_state.z.v])
+                    acceleration = np.array([current_state.x.a, current_state.y.a, current_state.z.a])
+                # If strategy is not defined or not met conditions of won't try
                 else:
                     continue
 
@@ -188,12 +200,14 @@ def add_next_gate(course: list[np.array],
                 pos = get_positions_from_boundary_conditions(boundary_conditions, segment_lengths, 30)
                 vel = derive_trajectory(pos, 30)
                 acc = derive_trajectory(pos, 30, 2)
+
                 if check_traj_direction:
                     gate_direction = R.from_euler('z', course[gate_idx][3]).as_matrix() @ INITIAL_GATE_EXIT
                 else:
                     gate_direction = np.zeros(3)
-                if evaluate_vel_accel_profile(vel, acc, gate_direction=gate_direction):
-                    if gate_idx != 5:
+
+                if evaluate_vel_accel_profile(vel, acc, gate_direction=gate_direction, use_curve=use_curve):
+                    if not last_gate:
                         trajectories_new.append(new_trajectory)
                         continue
 

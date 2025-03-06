@@ -142,7 +142,7 @@ def line_segments_intersect(p1, p2, q1, q2):
     return ccw(p1, q1, q2) != ccw(p2, q1, q2) and ccw(p1, p2, q1) != ccw(p1, p2, q2)
 
 
-def evaluate_vel_accel_profile(vel: np.ndarray, acc: np.ndarray, gate_direction: np.array = np.zeros(3)) -> bool:
+def evaluate_vel_accel_profile(vel: np.ndarray, acc: np.ndarray, gate_direction: np.array = np.zeros(3), use_curve=True) -> bool:
     """
     Returns True if velocity and acceleration values are reasonable based on IRL testing
 
@@ -156,7 +156,10 @@ def evaluate_vel_accel_profile(vel: np.ndarray, acc: np.ndarray, gate_direction:
         bool: GV constraints met or not
     """
     for v, a in zip(vel, acc):
-        limit = -0.3 * (np.linalg.norm(v) ** 3) + 2.0
+        if use_curve:
+            limit = -0.3 * (np.linalg.norm(v) ** 3) + 2.0
+        else:
+            limit = 2.0
         acc_towards_vel = np.dot(v, a) > 0
         vel_backwards = np.dot(v, gate_direction) < 0.0
 
