@@ -6,7 +6,30 @@ import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 
 
+################################################# Activation #################################################
+
+class PELU(nn.Module):
+    """Parametric Exponential Linear Unit."""
+
+    def __init__(self) -> None:
+        """Initialize learnable parameters."""
+        super().__init__()
+        self.log_a = nn.Parameter(torch.zeros(1))
+        self.log_b = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass."""
+
+        a = self.log_a.exp()
+        b = self.log_b.exp()
+        return torch.where(
+            x >= 0,
+            x * (a / b),
+            a * (torch.exp(x / b) - 1)
+        )
+
 ################################################# Enbeddings #################################################
+
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):

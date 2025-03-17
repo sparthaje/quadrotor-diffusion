@@ -37,8 +37,8 @@ def fit_to_recon(recon_pos: np.ndarray, ctrl_freq: int) -> tuple[np.ndarray, np.
     spline_vz = UnivariateSpline(t, derived_vel_smooth[:, 2], s=0.3, k=4)
 
     vel_fitted = np.column_stack((spline_vx(t), spline_vy(t), spline_vz(t)))
-    vel_fitted[0] = np.array([0.0, 0.0, 0.0])
-    vel_fitted[1] = np.array([0.0, 0.0, 0.0])
+    # vel_fitted[0] = np.array([0.0, 0.0, 0.0])
+    # vel_fitted[1] = np.array([0.0, 0.0, 0.0])
 
     derived_accel = derive_trajectory(vel_fitted, 30, order=1)
     derived_accel_smooth = savgol_filter(derived_accel, window_length=50, polyorder=3, axis=0)
@@ -46,7 +46,7 @@ def fit_to_recon(recon_pos: np.ndarray, ctrl_freq: int) -> tuple[np.ndarray, np.
     spline_ay = UnivariateSpline(t, derived_accel_smooth[:, 1], s=0.2, k=3)
     spline_az = UnivariateSpline(t, derived_accel_smooth[:, 2], s=0.2, k=3)
     accel_fitted = np.column_stack((spline_ax(t), spline_ay(t), spline_az(t)))
-    accel_fitted[0] = np.array([0.0, 0.0, 0.0])
-    accel_fitted[1] = np.array([0.0, 0.0, 0.0])
+    # accel_fitted[0] = np.array([0.0, 0.0, 0.0])
+    # accel_fitted[1] = np.array([0.0, 0.0, 0.0])
 
     return pos_fitted, vel_fitted, accel_fitted

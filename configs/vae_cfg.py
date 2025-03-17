@@ -4,12 +4,12 @@ import numpy as np
 
 from quadrotor_diffusion.utils.nn.args import TrainerArgs, VAE_EncoderArgs, VAE_DecoderArgs, VAE_WrapperArgs
 from quadrotor_diffusion.utils.dataset.normalizer import GuassianNormalizer, NoNormalizer, LinearNormalizer
-from quadrotor_diffusion.utils.dataset.dataset import QuadrotorTrajectoryDataset, QuadrotorRaceTrajectoryDataset
+from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceSegmentDataset
 
 train_args = TrainerArgs(
-    ema_decay=0.995,
-    num_batches_no_ema=25,
-    num_batches_per_ema=25,
+    ema_decay=0.0,
+    num_batches_no_ema=float('inf'),
+    num_batches_per_ema=float('inf'),
 
     batch_size_per_gpu=128,
     batches_per_backward=4,
@@ -17,36 +17,40 @@ train_args = TrainerArgs(
     log_dir="logs/training",
     save_freq=5,
 
-    learning_rate=1e-4,
+    learning_rate=2e-4,
     num_gpus=1,
     device="cuda:3",
 
     max_epochs=400,
     evaluate_every=5,
+    description="attention on mu/logvar + PeLU"
 )
 
 vae_args = VAE_WrapperArgs(
     loss="Smooth",
-    beta=0.5,
+    beta=0.25,
     loss_params=(
-        "L1",
+        "WeightedL1",
+        # Weighting on the percent of horizon
+        (0.1, 3.0),
         # Weighting for L1 loss on velocity and acceleration
-        (0.3, 0.1)
-    )
+        (0.3, 0.1),
+    ),
+    telomere_strategy=1
 )
 
 encoder_args = VAE_EncoderArgs(
     3,
     12,
-    64,
-    (1, 2, 4),
+    128,
+    (1, 2, 4, 8),
 )
 
 decoder_args = VAE_DecoderArgs(
     3,
     12,
-    64,
-    (4, 2, 1)
+    128,
+    (8, 4, 2, 1)
 )
 
-dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 360, NoNormalizer())
+dataset = QuadrotorRaceSegmentDataset('data', ["square", "triangle", "pill"], 112, 0, NoNormalizer())

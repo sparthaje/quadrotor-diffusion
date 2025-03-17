@@ -27,8 +27,6 @@ def plot_reference_time_series(save_path: str, title: str, reference, observed=N
     - reference: numpy array [n x 3] where columns are [x, y, z] positions
     - observed: Optional, same format as reference
     """
-    time = np.arange(len(reference)) * 1/30
-
     # Create subplots
     fig, axs = plt.subplots(3, 1, figsize=(15, 12))
     fig.suptitle(title)
@@ -39,13 +37,13 @@ def plot_reference_time_series(save_path: str, title: str, reference, observed=N
     for dim_idx in range(3):
         ax = axs[dim_idx]
 
-        ax.plot(time, reference[:, dim_idx],
+        ax.plot(np.arange(len(reference)) * 1/30, reference[:, dim_idx],
                 label='Reference',
                 color=colors[dim_idx], linestyle='--' if observed is not None else '-', linewidth=3.5)
 
         # Plot simulation states if provided
         if observed is not None:
-            ax.plot(time, observed[:, dim_idx],
+            ax.plot(np.arange(len(observed)) * 1/30, observed[:, dim_idx],
                     label='Observed',
                     color=colors[dim_idx], linestyle='-', linewidth=3.5)
 

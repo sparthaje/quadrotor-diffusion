@@ -5,9 +5,9 @@ import torch.nn as nn
 import einops
 
 from quadrotor_diffusion.utils.logging import iprint as print
-from quadrotor_diffusion.models.losses import VAE_Loss, MSELoss, L1Loss, SmoothReconstructionLoss
+from quadrotor_diffusion.models.losses import VAE_Loss, MSELoss, L1Loss, SmoothReconstructionLoss, WeightedL1Loss
 from quadrotor_diffusion.utils.nn.args import VAE_EncoderArgs, VAE_DecoderArgs, VAE_WrapperArgs
-from quadrotor_diffusion.models.attention import LinearAttention, Residual, PreNorm
+from quadrotor_diffusion.models.attention import LinearAttention, Attention, Residual, PreNorm
 from quadrotor_diffusion.models.nn_blocks import (
     Conv1dNormalized,
     Downsample1d,
@@ -54,7 +54,10 @@ class Encoder1D(nn.Module):
         dims = [args.features * m for m in args.channel_mults]
 
         # Initial projection
-        self.init_conv = Conv1dNormalized(args.traj_dim, args.features, kernel_size=5)
+        self.init_conv = nn.Sequential(
+            Residual(PreNorm(args.traj_dim, LinearAttention(args.traj_dim, dim_head=16))),
+            Conv1dNormalized(args.traj_dim, args.features, kernel_size=5),
+        )
 
         # Down layers which reduce temporal dimension
         self.downs = nn.ModuleList([])
@@ -131,8 +134,11 @@ class Decoder1D(nn.Module):
             ]))
 
         # Final layers to produce output
-        self.final_block = ResNet1DBlock(dims[-1], dims[-1])
-        self.to_out = nn.Conv1d(dims[-1], args.traj_dim, 1)
+        self.final_block = ResNet1DBlock(dims[-1], dims[-1], kernel_size=5)
+        self.to_out = nn.Sequential(
+            nn.Conv1d(dims[-1], args.traj_dim, 1),
+            Residual(PreNorm(args.traj_dim, LinearAttention(args.traj_dim, dim_head=16))),
+        )
 
     def forward(self, z):
         """
@@ -173,9 +179,15 @@ class VAE_Wrapper(nn.Module):
         assert isinstance(args[0], VAE_WrapperArgs)
         assert isinstance(args[1], VAE_EncoderArgs)
         assert isinstance(args[2], VAE_DecoderArgs)
+        assert args[0].telomere_strategy in (0, 1, 2)
 
         self.encoder = Encoder1D(args[1])
         self.decoder = Decoder1D(args[2])
+
+        self.compression = 2 ** (len(self.args[1].channel_mults) - 1)
+        self.telomere_token = torch.nn.Parameter(
+            0.0 * torch.ones((1, self.compression, 3))
+        )
 
         if args[0].loss == "MSELoss":
             self.loss = VAE_Loss(MSELoss(), args[0].beta)
@@ -183,15 +195,18 @@ class VAE_Wrapper(nn.Module):
             self.loss = VAE_Loss(L1Loss(), args[0].beta)
 
         elif args[0].loss == "Smooth":
-            recon_loss, smoothness_betas = args[0].loss_params
+            recon_loss = args[0].loss_params[0]
 
             if recon_loss == "L1":
                 recon_loss = L1Loss()
             elif recon_loss == "L2":
                 recon_loss = MSELoss()
+            elif recon_loss == "WeightedL1":
+                recon_loss = WeightedL1Loss(args[0].loss_params[1])
             else:
                 raise NotImplementedError("Loss not implemented")
 
+            smoothness_betas = args[0].loss_params[-1]
             self.loss = VAE_Loss(
                 SmoothReconstructionLoss(recon_loss, smoothness_betas), args[0].beta
             )
@@ -206,7 +221,7 @@ class VAE_Wrapper(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def compute_loss(self, x_0, **kwargs):
+    def compute_loss(self, x, **kwargs):
         """
         Does a forward pass and computes the loss
 
@@ -218,43 +233,60 @@ class VAE_Wrapper(nn.Module):
         - loss: Result from loss function
         """
 
-        mu, logvar = self.encoder(x_0)
-        z = self.reparameterize(mu, logvar)
-        reconstruction = self.decoder(z)
+        # If 0, we are learning to encode the whole sequence
+        # If 2, we are learning to encode the sequence using the natural prior/next tokens as a telomere
+        if self.args[0].telomere_strategy == 0 or self.args[0].telomere_strategy == 2:
+            encoder_input = x
 
-        loss = self.loss((mu, logvar, reconstruction), x_0)
+        # If 1, use explicit telomere token
+        elif self.args[0].telomere_strategy == 1:
+            telomere_tokens = self.telomere_token.expand((x.shape[0], -1, -1))
+            encoder_input = torch.cat([telomere_tokens, x, telomere_tokens], dim=1)
+
+        mu, logvar = self.encoder(encoder_input)
+        z = self.reparameterize(mu, logvar)
+
+        reconstruction = self.decoder(z)
+        # For strategy 1/2 remove telomere tokens
+        if self.args[0].telomere_strategy == 1 or self.args[0].telomere_strategy == 2:
+            reconstruction = reconstruction[:, self.compression:-self.compression, :]
+
+        # For strategy 2 remove telomere from target
+        target = x
+        if self.args[0].telomere_strategy == 2:
+            target = x[:, self.compression:-self.compression, :]
+
+        loss = self.loss((mu, logvar, reconstruction), target)
         return loss
 
     @torch.no_grad()
-    def encode(self, x: torch.Tensor, padding=0) -> tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Encode input to latent distribution
 
         Parameters:
         x: Input data (batch_size, n, 3)
-        padding: Padding on time horizon
         """
 
-        if padding > 0:
-            top_row = x[..., 0:1, :].repeat(1, padding, 1)
-            bottom_row = x[..., -1:, :].repeat(1, padding, 1)
-            x = torch.cat([top_row, x, bottom_row], dim=1)
+        if self.args[0].telomere_strategy == 1:
+            telomere_tokens = self.telomere_token.expand((x.shape[0], -1, -1))
+            x = torch.cat([telomere_tokens, x, telomere_tokens], dim=1)
 
         return self.encoder(x)
 
     @torch.no_grad()
-    def decode(self, z, padding=0) -> torch.Tensor:
+    def decode(self, z) -> torch.Tensor:
         """
         Decode latent vectors to time series
         Parameters:
         z: Latent vector (batch_size, compressed_horizon, features)
-        padding: Padding on time horizon
         """
 
         decoded = self.decoder(z)
-        if padding > 0:
-            decoded = decoded[:, padding:-padding, :]
-        return decoded
+        if self.args[0].telomere_strategy == 0:
+            return decoded
+
+        return decoded[:, self.compression:-self.compression, :]
 
     @torch.no_grad()
     def sample(self, num_samples: int, horizon: int, device='cuda'):

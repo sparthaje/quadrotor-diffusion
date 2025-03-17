@@ -86,10 +86,15 @@ class VAE_WrapperArgs:
     loss: An nn.Module wrapper of a loss function (can be dynamic with learnable parameters)
     Loss Params: whatever parameters are relevant to the internal reconstruction loss
     beta: How much to weight KL divergence
+    telomere_strategy: 
+        0: None
+        1: Telomere token on both ends
+        2: Encode previous / next states as telomere
     """
     loss: str
     loss_params: Tuple
     beta: float
+    telomere_strategy: int
 
 
 @dataclass
@@ -120,8 +125,8 @@ class TrainerArgs:
     device: device to train on
     max_epochs: number of epochs to stop at
     evaluate_every: Train for this many epochs, evaluate the model, then return to training. Default = No evaluation
+    description: description of model / experiment
     """
-
     ema_decay: float
     num_batches_no_ema: int
     num_batches_per_ema: int
@@ -137,3 +142,4 @@ class TrainerArgs:
     device: str = 'cuda'
     max_epochs: int = None
     evaluate_every: int = None
+    description: str = ""

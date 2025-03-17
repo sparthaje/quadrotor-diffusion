@@ -52,6 +52,42 @@ class L1Loss(nn.Module):
         }
 
 
+class WeightedL1Loss(nn.Module):
+
+    def __init__(self, params: tuple[float, float]):
+        """
+
+        Args:
+            params (tuple[int, int]): (Percent horizon, weight (>1))
+        """
+        super().__init__()
+        self.params = params
+
+    def forward(self, pred, targ):
+        """
+        Computes weighted L1 Loss between prediction and target
+
+        Parameters
+        - pred: network output [batch_size x horizon x states]
+        - targ: expected output [batch_size x horizon x states]
+
+        Returns:
+        - Loss
+        """
+        loss = F.l1_loss(pred, targ, reduction='none')
+
+        _, H, _ = pred.shape
+        weights = torch.ones_like(pred)
+        weights[:, :int(H*self.params[0]), :] = self.params[1]
+
+        loss = (weights * loss).mean()
+
+        return {
+            "loss": loss,
+            "L1": loss
+        }
+
+
 class SmoothReconstructionLoss(nn.Module):
 
     def __init__(self, reconstruction_loss: nn.Module, betas: list[float]):

@@ -45,6 +45,10 @@ trainer = Trainer(train_args, vae_model, dataset)
 
 print("\n" + "="*100 + "\n")
 
+random.seed(42)
+evaluation_set = [random.randint(0, len(dataset) - 1) for _ in range(10)]
+random.seed(int.from_bytes(os.urandom(4), "little"))
+
 N_epochs = trainer.args.max_epochs
 trainer.args.max_epochs = 0
 while trainer.epoch < N_epochs:
@@ -54,9 +58,8 @@ while trainer.epoch < N_epochs:
     # Step 1: Evaluate model on random samples from dataset.
     fig = plt.figure(figsize=(18, 16))
 
-    for row in range(4):
-        idx = random.randint(0, len(dataset) - 1)
-        sample = dataset[idx]
+    for row in range(10):
+        sample = dataset[evaluation_set[row]]
         inp = sample.float().unsqueeze(0).to(trainer.args.device)
         mu, logvar = vae_model.encode(inp)
         reconstructed = vae_model.decode(mu).squeeze(0).cpu().numpy()
@@ -64,24 +67,21 @@ while trainer.epoch < N_epochs:
         reference = dataset.normalizer.undo(sample.cpu().numpy())
         reconstructed = dataset.normalizer.undo(reconstructed)
 
-        # Plot x coordinate
-        plt.subplot(4, 3, row * 3 + 1)
+        plt.subplot(10, 3, row * 3 + 1)
         plt.plot(reference[:, 0], label='Reference', linewidth=3.5)
         plt.plot(reconstructed[:, 0], label='Reconstructed', linewidth=1.5)
         plt.plot(reference[:, 0] - reconstructed[:, 0], label='Error', linewidth=1.5)
         plt.ylabel("x (meters)")
         plt.grid()
 
-        # Plot y coordinate
-        plt.subplot(4, 3, row * 3 + 2)
+        plt.subplot(10, 3, row * 3 + 2)
         plt.plot(reference[:, 1], label='Reference', linewidth=3.5)
         plt.plot(reconstructed[:, 1], label='Reconstructed', linewidth=1.5)
         plt.plot(reference[:, 1] - reconstructed[:, 1], label='Error', linewidth=1.5)
         plt.ylabel("y (meters)")
         plt.grid()
 
-        # Plot z coordinate
-        plt.subplot(4, 3, row * 3 + 3)
+        plt.subplot(10, 3, row * 3 + 3)
         plt.plot(reference[:, 2], label='Reference', linewidth=3.5)
         plt.plot(reconstructed[:, 2], label='Reconstructed', linewidth=1.5)
         plt.plot(reference[:, 2] - reconstructed[:, 2], label='Error', linewidth=1.5)
@@ -89,7 +89,7 @@ while trainer.epoch < N_epochs:
         plt.grid()
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.95)  # Make room for the legend
+    plt.subplots_adjust(top=0.95)
     fig.legend(['Reference', 'Reconstructed', 'Error'],
                loc='upper center',
                bbox_to_anchor=(0.5, 0.98),

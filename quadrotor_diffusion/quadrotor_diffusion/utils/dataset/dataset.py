@@ -70,11 +70,11 @@ class QuadrotorRaceTrajectoryDataset(Dataset):
     def __getitem__(self, idx):
         if self.includes_course:
             course_filename, trajectory_filename = self.data[idx]
+            assert course_filename.endswith(".npy")
         else:
             trajectory_filename = self.data[idx]
 
         assert trajectory_filename.endswith(".pkl")
-        assert course_filename.endswith(".npy")
 
         with open(trajectory_filename, "rb") as trajectory_file:
             trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
@@ -89,6 +89,92 @@ class QuadrotorRaceTrajectoryDataset(Dataset):
             "trajectory": torch.tensor(trajectory, dtype=torch.float32),
             "course": torch.tensor(course, dtype=torch.float32)
         }
+
+
+class QuadrotorRaceSegmentDataset(Dataset):
+    def __init__(self, data_dir: str, course_types: list[str], traj_len: int, padding: int, normalizer: Normalizer):
+        """
+        Args:
+            data_dir (str): Root dir where course/linear, course/u, etc exists
+            course_types (list[str]): linear, u, etc.
+            traj_len (int): Trajectory length to pad to (i.e. 12s = 360 points)
+            normalizer (Normalizer): Normalizer for trajectory data
+            padding (int):  How much to pad trajectory with the consecutive / previous states
+        """
+
+        super().__init__()
+        self.data_dir = data_dir
+        self.course_types = course_types
+        self.normalizer = normalizer
+        self.traj_len = traj_len
+        self.padding = padding
+        self.data: list[tuple[str, int, int]] = []  # trajectory filename, start index, end index
+        self._load_data()
+
+    def _load_data(self):
+        for course_type in self.course_types:
+            course_dir = os.path.join(self.data_dir, "courses", course_type)
+            if not os.path.isdir(course_dir):
+                continue
+
+            for sample in os.listdir(course_dir):
+                sample_dir = os.path.join(course_dir, sample)
+                if not os.path.isdir(sample_dir):
+                    continue
+
+                course_filename = os.path.join(sample_dir, "course.npy")
+                if not os.path.exists(course_filename):
+                    continue
+
+                # Find valid trajectories
+                valid_dir = os.path.join(sample_dir, "valid")
+                if os.path.exists(valid_dir):
+                    for valid_file in os.listdir(valid_dir):
+                        if valid_file.endswith(".pkl"):
+                            traj_filename = os.path.join(valid_dir, valid_file)
+
+                            with open(traj_filename, "rb") as trajectory_file:
+                                trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
+
+                            gate_idx = 0
+                            for segment_length in trajectory.segment_lengths:
+                                self.data.append((traj_filename, gate_idx, gate_idx + self.traj_len))
+                                gate_idx += int(30 * segment_length)
+
+                            total_trajectory_length = int(sum(trajectory.segment_lengths) * 30)
+                            for _ in range(4):
+                                start = random.randint(0, total_trajectory_length - self.traj_len)
+                                end = start + self.traj_len
+                                self.data.append((traj_filename, start, end))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        trajectory_filename, start, end = self.data[idx]
+
+        assert trajectory_filename.endswith(".pkl")
+
+        with open(trajectory_filename, "rb") as trajectory_file:
+            trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
+
+            # Re-append the segment from gate 1 to gate 2, so if the traj_len exceeds the last part it can loop back around
+            trajectory.states.append(trajectory.states[2])
+            trajectory.segment_lengths.append(trajectory.segment_lengths[1])
+
+            trajectory.states.append(trajectory.states[3])
+            trajectory.segment_lengths.append(trajectory.segment_lengths[2])
+
+        trajectory = trajectory.as_ref_pos()
+        if self.padding > 0:
+            starting_state = np.tile(trajectory[0], (self.padding, 1))
+            trajectory = np.vstack((starting_state, trajectory))
+
+        trajectory = self.normalizer(trajectory)
+        return torch.tensor(trajectory[start:end+2*self.padding], dtype=torch.float32)
+
+    def __str__(self):
+        return f"QuadrotorRaceSegmentDataset({self.course_types}, {self.traj_len}, {self.padding})"
 
 
 def evaluate_dataset(dataset: Dataset):

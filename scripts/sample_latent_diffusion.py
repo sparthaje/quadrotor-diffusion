@@ -63,20 +63,30 @@ trainer_args: TrainerArgs = None
 
 diff, ema, normalizer, trainer_args = Trainer.load(chkpt)
 print(f"Loaded {chkpt}")
+print(f"Using {normalizer}")
 
 vae_experiment: int = 102
 chkpt = get_checkpoint_file("logs/training", vae_experiment)
 vae_wrapper: VAE_Wrapper = None
 vae_wrapper, _, _, _ = Trainer.load(chkpt, get_ema=False)
 vae_wrapper.to(args.device)
+vae_downsample = 2 ** (len(vae_wrapper.args[1].channel_mults) - 1)
 
 model = diff if args.no_ema else ema
 model.decoder = vae_wrapper.decode
-print(f"Using {normalizer}")
-
 model.to(args.device)
+
+N = 100
+if args.time_it:
+    start = time.time()
+    for _ in tqdm.tqdm(range(N)):
+        trajectories = model.sample(1, args.horizon, vae_downsample, args.device, conditioning=None)
+    end = time.time() - start
+    print(f"{end / N:.2f} seconds on avg to generate 1 sample with {args.device}")
+    sys.exit(0)
+
+
 start = time.time()
-vae_downsample = 2 ** (len(vae_wrapper.args[1].channel_mults) - 1)
 trajectories = model.sample(args.samples, args.horizon, vae_downsample, args.device, conditioning=course)
 print(f"{time.time() - start:.2f} seconds to generate {args.samples} samples with {args.device}")
 
@@ -110,11 +120,3 @@ for i in range(trajectories.size(0)):
 
     create_perspective_rendering(states, course_npy, reference=pos,
                                  filename=os.path.join(sample_dir, f"sample_{i}.mp4"))
-
-N = 100
-if args.time_it:
-    start = time.time()
-    for _ in tqdm.tqdm(range(N)):
-        trajectories = model.sample(1, args.horizon, vae_downsample, args.device, conditioning=None)
-    end = time.time() - start
-    print(f"{end / N:.2f} seconds on avg to generate 1 sample with {args.device}")

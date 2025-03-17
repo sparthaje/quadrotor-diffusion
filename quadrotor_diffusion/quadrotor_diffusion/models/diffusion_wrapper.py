@@ -73,9 +73,6 @@ class DiffusionWrapper(nn.Module):
         else:
             raise NotImplementedError(f"{loss} loss module is not supported")
 
-        num_params = sum(p.numel() for p in self.parameters()) / 1e6
-        print(f"{num_params:.2f} million parameters")
-
     def compute_loss(self, x_0, **kwargs) -> torch.Tensor:
         """
         Does a forward pass and computes the loss

@@ -72,6 +72,9 @@ class Trainer:
 
         self.epoch = 0
 
+        num_params = sum(p.numel() for p in self.model.parameters()) / 1e6
+        print(f"{num_params:.2f} million parameters")
+
     @torch.no_grad()
     def test_forward_pass(self):
         start = time.time()
