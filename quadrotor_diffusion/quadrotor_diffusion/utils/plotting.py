@@ -342,7 +342,7 @@ class GateLegendHandler(HandlerBase):
         return [rect, left_circle, right_circle]
 
 
-def add_gates_to_course(course: list[np.array], ax: plt.Axes):
+def add_gates_to_course(course: list[np.array], ax: plt.Axes, has_end=True):
     """
     Adds a list of gates to the plot
 
@@ -350,7 +350,8 @@ def add_gates_to_course(course: list[np.array], ax: plt.Axes):
         course (list[np.array]): Full course including the starting and ending point
         ax (plt.Axes)
     """
-    for obj in course[1:-1]:
+    gates = course[1:-1] if has_end else course[1:]
+    for obj in gates:
         x, y, z, yaw = obj
         rect = patches.Rectangle((-0.25, -0.05), 0.5, 0.1, edgecolor='black', facecolor='white', alpha=0.8)
         t = plt.matplotlib.transforms.Affine2D()
@@ -374,7 +375,8 @@ def add_gates_to_course(course: list[np.array], ax: plt.Axes):
     starting_face_color = 'black' if course[0][2] == 0.525 else 'white'
     ending_face_color = 'black' if course[-1][2] == 0.525 else 'white'
     ax.scatter([course[0][0]], [course[0][1]], s=100, marker='*', facecolor=starting_face_color, edgecolor='black')
-    ax.scatter([course[-1][0]], [course[-1][1]], s=100, marker='o', facecolor=ending_face_color, edgecolor='black')
+    if has_end:
+        ax.scatter([course[-1][0]], [course[-1][1]], s=100, marker='o', facecolor=ending_face_color, edgecolor='black')
 
     high_patch = patches.Patch(color='none', label="High Gate (0.525 m)")
     low_patch = patches.Patch(color='none', label="Low Gate (0.3 m)")

@@ -25,12 +25,10 @@ parser.add_argument('-e', '--experiment', type=int, help='Experiment number', re
 
 parser.add_argument('-s', '--samples', type=int, help='Number of trajectories to generate', required=True)
 parser.add_argument('-c', '--course', type=str, help='Sample (course_type,course_number)', required=True)
-parser.add_argument('-o', '--horizon', type=int, help='Horizon', required=True)
 
 parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is biggest', default=None)
 parser.add_argument('-d', '--device', type=str, help='Device to use', default="cuda")
 parser.add_argument('-m', '--no_ema', action='store_true', help="Use normal model instead of ema model.")
-parser.add_argument('-t', '--time_it', action='store_true', help="Time the diffusion process")
 
 args = parser.parse_args()
 sys.argv = [sys.argv[0]]
@@ -42,19 +40,17 @@ print(sample_dir)
 
 with open(os.path.join(sample_dir, "overview.txt"), "w") as f:
     f.write(
-        f"Horizon: {args.horizon}\n" +
         f"Num Samples: {args.samples}\n" +
         ("Not using EMA\n" if args.no_ema else "Using EMA\n") +
         f"Device: {args.device}\n"
     )
 
-course_npy = []
+course = []
 if args.course.endswith(".npy"):
-    course_npy = np.load(args.course)
+    course = np.load(args.course)
 else:
     sample_info = args.course.split(",")
-    course_npy, _, _ = load_course_trajectory(sample_info[0], sample_info[1], 0)
-course = torch.tensor(course_npy, dtype=torch.float32).to(args.device)
+    course, _, _ = load_course_trajectory(sample_info[0], sample_info[1], 0)
 
 model: LatentDiffusionWrapper = None
 ema: LatentDiffusionWrapper = None
@@ -65,7 +61,7 @@ diff, ema, normalizer, trainer_args = Trainer.load(chkpt)
 print(f"Loaded {chkpt}")
 print(f"Using {normalizer}")
 
-vae_experiment: int = 102
+vae_experiment: int = 157
 chkpt = get_checkpoint_file("logs/training", vae_experiment)
 vae_wrapper: VAE_Wrapper = None
 vae_wrapper, _, _, _ = Trainer.load(chkpt, get_ema=False)
@@ -76,47 +72,103 @@ model = diff if args.no_ema else ema
 model.decoder = vae_wrapper.decode
 model.to(args.device)
 
-N = 100
-if args.time_it:
-    start = time.time()
-    for _ in tqdm.tqdm(range(N)):
-        trajectories = model.sample(1, args.horizon, vae_downsample, args.device, conditioning=None)
-    end = time.time() - start
-    print(f"{end / N:.2f} seconds on avg to generate 1 sample with {args.device}")
-    sys.exit(0)
+# Generate first segment from starting point to gate 1
 
+
+def score(trajectories: torch.Tensor, initial_position: np.array) -> int:
+    initial_position = torch.tensor(initial_position, dtype=torch.float32, device="cpu")
+    return torch.argmin(torch.norm(trajectories[:, 0, :] - initial_position, dim=-1)).item()
+
+
+def score(trajectories: torch.Tensor, initial_position: np.array) -> int:
+    """
+    Returns the index of a trajectory whose initial position is within 0.03 of the given initial_position and
+    which has the largest distance between its first and last points. Falls back to the trajectory with the minimal
+    initial distance if no trajectory meets the threshold.
+    """
+    initial_position = torch.tensor(initial_position, dtype=torch.float32, device="cpu")
+    dists0 = torch.norm(trajectories[:, 0, :] - initial_position, dim=-1)
+    filtered_idxs = torch.nonzero(dists0 < 0.05, as_tuple=True)[0]
+    if len(filtered_idxs) == 0:
+        return torch.argmin(dists0).item()
+    diff = torch.norm(trajectories[filtered_idxs, 0, :] - trajectories[filtered_idxs, -1, :], dim=-1)
+    return filtered_idxs[torch.argmax(diff)].item()
+
+
+local_conditioning = torch.tensor(np.tile(course[0], (6, 1)), dtype=torch.float32).to(args.device)
+local_conditioning = local_conditioning.unsqueeze(0).expand((args.samples, -1, -1))
+
+global_conditioning = np.vstack((course[1:], course[1:0]))
+null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(global_conditioning), 1))
+global_conditioning = np.vstack((global_conditioning, null_tokens))
+global_conditioning = torch.tensor(global_conditioning, dtype=torch.float32).to(args.device)
+
+print("Warming")
+torch.backends.cudnn.benchmark = True
+for i in range(25):
+    trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
+                                local_conditioning=local_conditioning, conditioning=global_conditioning)
+print("Finished warming")
 
 start = time.time()
-trajectories = model.sample(args.samples, args.horizon, vae_downsample, args.device, conditioning=course)
-print(f"{time.time() - start:.2f} seconds to generate {args.samples} samples with {args.device}")
+trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
+                            local_conditioning=local_conditioning, conditioning=global_conditioning).cpu()
 
-for i in range(trajectories.size(0)):
-    sampled = trajectories[i].cpu().numpy()
+segments = []
 
-    pos, vel, acc = fit_to_recon(sampled, 30)
+segment_0 = trajectories[score(trajectories, course[0][:3])].numpy()
+ending_idx = np.argmin(np.linalg.norm(segment_0 - course[1][:3], axis=1))
+segment_0 = segment_0[:ending_idx]
+segments.append(segment_0)
 
-    plot_states(
-        pos, vel, acc,
-        f"Sample {i} / {trajectories.size(0)}",
-        os.path.join(sample_dir, f"sample_{i}.pdf")
-    )
+for i in range(len(course) - 1):
+    gate_idx = i + 1
+    local_conditioning = np.hstack((segments[-1][-6:], np.zeros((6, 1))))
+    local_conditioning = torch.tensor(local_conditioning, dtype=torch.float32).to(args.device)
+    local_conditioning = local_conditioning.unsqueeze(0).expand((args.samples, -1, -1))
 
-    _, ax = course_base_plot()
-    add_gates_to_course(course_npy, ax)
-    add_trajectory_to_course(pos, velocity_profile=vel)
-    plt.savefig(os.path.join(sample_dir, f"sample_{i}_bev.pdf"))
-    plt.close()
+    global_conditioning = np.vstack((course[1+gate_idx:], course[1:gate_idx]))
+    null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(global_conditioning), 1))
+    global_conditioning = np.vstack((global_conditioning, null_tokens))
+    global_conditioning = torch.tensor(global_conditioning, dtype=torch.float32).to(args.device)
 
-    worked, states = play_trajectory(pos, vel, acc)
-    if not worked:
-        print("Failed")
+    trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
+                                local_conditioning=local_conditioning, conditioning=global_conditioning).cpu()
 
-    plot_ref_obs_states(
-        pos, vel, acc,
-        states[0], states[1], states[1],
-        f"Sample {i} / {trajectories.size(0)}",
-        os.path.join(sample_dir, f"sample_{i}_sim.pdf")
-    )
+    trajectory = trajectories[score(trajectories, segments[-1][-1])].numpy()
+    next_gate = gate_idx + 1 if gate_idx + 1 < len(course) else 1
+    ending_idx = np.argmin(np.linalg.norm(trajectory - course[next_gate][:3], axis=1))
+    trajectory = trajectory[:ending_idx]
+    segments.append(trajectory)
 
-    create_perspective_rendering(states, course_npy, reference=pos,
-                                 filename=os.path.join(sample_dir, f"sample_{i}.mp4"))
+segments.append(segments[1])
+trajectory = np.vstack(segments)
+pos, vel, acc = fit_to_recon(trajectory, 30)
+
+print(f"Finished sampling in {time.time() - start:.4f} seconds")
+
+plot_states(
+    pos, vel, acc,
+    f"Sample {i} / {trajectories.size(0)}",
+    os.path.join(sample_dir, f"sample.pdf")
+)
+
+_, ax = course_base_plot()
+add_gates_to_course(course, ax, has_end=False)
+add_trajectory_to_course(pos, velocity_profile=vel)
+plt.savefig(os.path.join(sample_dir, f"bev.pdf"))
+plt.close()
+
+worked, states = play_trajectory(pos, vel, acc)
+if not worked:
+    print("Failed")
+
+plot_ref_obs_states(
+    pos, vel, acc,
+    states[0], states[1], states[1],
+    f"Sample {i} / {trajectories.size(0)}",
+    os.path.join(sample_dir, f"sim.pdf")
+)
+
+create_perspective_rendering(states, np.vstack([course, course[-1]]), reference=pos,
+                             filename=os.path.join(sample_dir, f"sample.mp4"))

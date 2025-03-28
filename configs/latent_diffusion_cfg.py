@@ -4,7 +4,7 @@ import numpy as np
 
 from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, NormalizerTuple
-from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset
+from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset, DiffusionDataset
 
 unet_args = Unet1DArgs(
     traj_dim=12,
@@ -41,13 +41,13 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:3",
+    device="cuda:0",
     max_epochs=400,
     evaluate_every=5,
 )
 
-vae_experiment = 102
+vae_experiment = 157
 
 normalizer = NoNormalizer()
 
-dataset = QuadrotorRaceTrajectoryDataset('data', ["linear", "u"], 384, normalizer, True)
+dataset = DiffusionDataset("data", 112, normalizer)

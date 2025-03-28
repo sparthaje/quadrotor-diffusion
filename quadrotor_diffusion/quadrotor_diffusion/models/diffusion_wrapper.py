@@ -133,6 +133,15 @@ class DiffusionWrapper(nn.Module):
 
             # Get model prediction (either epsilon or x_0)
             model_output = self.model(x_t, time_t, conditioning)
+            if conditioning is not None:
+                # Sampling without global context
+                if len(conditioning) == 2:
+                    model_output_no_conditioning = self.model(x_t, time_t, conditioning)
+                # Sampling with global context
+                else:
+                    model_output_no_conditioning = self.model(x_t, time_t, (conditioning[0], conditioning[2]))
+                    w = 0.2
+                    model_output = (1 + w) * model_output - w * model_output_no_conditioning
 
             if guide is not None:
                 assert self.predict_epsilon
@@ -280,8 +289,8 @@ class LatentDiffusionWrapper(nn.Module):
         Compute loss for the given trajectory
         Args:
             batch:
-                - trajectory (torch.Tensor): [B, Horizon, 3]
-                - course (torch.Tensor): [B, 6, 4]
+                - x_0 (torch.Tensor): [B, Horizon, 3]
+                - conditioning (torch.Tensor): [B, 7, 4]
             kwargs (dict): Capture any additional arguments
 
         Returns:
@@ -290,19 +299,20 @@ class LatentDiffusionWrapper(nn.Module):
         assert self.encoder is not None, "Encoder has not been set"
 
         # [B, Horizon // 4, VAE_latent_dim]
-        latent_trajectory, _ = self.encoder(batch["trajectory"])
+        latent_trajectory, _ = self.encoder(batch["x_0"])
 
-        mask = torch.rand(batch["course"].shape[0], device=batch["course"].device) < self.args[0].dropout
-        batch["course"][mask] = self.null_token
+        mask = torch.rand(batch["global_conditioning"].shape[0],
+                          device=batch["global_conditioning"].device) < self.args[0].dropout
+        batch["global_conditioning"][mask] = self.null_token
 
         # If the trajectory is not divisible by the downsample factor, we need to pad it
         horizon_downsample_factor = 2 ** (len(self.args[1].channel_mults)-1)
         horizon_modulo = latent_trajectory.shape[-2] % horizon_downsample_factor
         assert horizon_modulo == 0, f"Invalid input data not divisible has module: {horizon_modulo}"
-        return self.diffusion.compute_loss(latent_trajectory, conditioning=batch["course"])
+        return self.diffusion.compute_loss(latent_trajectory, conditioning=(batch["local_conditioning"], batch["global_conditioning"]))
 
     @torch.no_grad()
-    def sample(self, batch_size: int, horizon: int, vae_downsample: int, device: str, conditioning: torch.Tensor = None) -> torch.Tensor:
+    def sample(self, batch_size: int, horizon: int, vae_downsample: int, device: str, local_conditioning: torch.Tensor, conditioning: torch.Tensor = None) -> torch.Tensor:
         """
         1. Samples latents from pure noise using the reverse diffusion process.
         2. Decodes latents using the VAE decoder.
@@ -323,9 +333,16 @@ class LatentDiffusionWrapper(nn.Module):
         assert horizon % (vae_downsample * diffusion_downsample) == 0
 
         latent_horizon = horizon // vae_downsample
-        conditioning = conditioning.unsqueeze(0) if conditioning is not None else self.null_token.unsqueeze(0)
-        conditioning = conditioning.expand(batch_size, -1, -1)
-        latent_trajectories = self.diffusion.sample(batch_size, latent_horizon, device, conditioning=conditioning)
+        null_conditioning = self.null_token.unsqueeze(0).expand(batch_size, -1, -1)
+        conditioning = conditioning.unsqueeze(0).expand(batch_size, -1, -1)
+
+        if conditioning is None:
+            c_tuple = (local_conditioning, null_conditioning)
+        else:
+            c_tuple = (local_conditioning, conditioning, null_conditioning)
+
+        latent_trajectories = self.diffusion.sample(
+            batch_size, latent_horizon, device, conditioning=c_tuple)
         trajectories = self.decoder(latent_trajectories)
 
         return trajectories

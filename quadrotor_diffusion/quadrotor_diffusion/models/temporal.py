@@ -136,6 +136,12 @@ class Unet1D(nn.Module):
                 nn.Linear(c_mid // 2, c_mid),
             )
             self.conditioning = Residual(PreNorm(c_mid, CrossAttention(c_mid, c_mid)))
+            self.global_conditioning_embedding = nn.Sequential(
+                nn.Linear(4, c_mid // 2),
+                nn.Mish(),
+                nn.Linear(c_mid // 2, c_mid),
+            )
+            self.global_conditioning = Residual(PreNorm(c_mid, CrossAttention(c_mid, c_mid)))
 
         # Up layers which scales horizon up by factors of 2^(len(channels_mult))
         self.ups = nn.ModuleList([])
@@ -181,9 +187,12 @@ class Unet1D(nn.Module):
         x = attention(x)
 
         if c is not None and self.conditioning is not None:
-            c = self.conditioning_embedding(c)
-            c = einops.rearrange(c, 'b n f -> b f n')
-            x = self.conditioning(x, c)
+            c_l = self.conditioning_embedding(c[0])
+            c_l = einops.rearrange(c_l, 'b n f -> b f n')
+            x = self.conditioning(x, c_l)
+            c_g = self.global_conditioning_embedding(c[1])
+            c_g = einops.rearrange(c_g, 'b n f -> b f n')
+            x = self.global_conditioning(x, c_g)
         elif c is not None and self.conditioning is None:
             raise ValueError("Need conditioning passed in")
         elif c is None and self.conditioning is not None:

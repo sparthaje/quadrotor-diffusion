@@ -177,6 +177,63 @@ class QuadrotorRaceSegmentDataset(Dataset):
         return f"QuadrotorRaceSegmentDataset({self.course_types}, {self.traj_len}, {self.padding})"
 
 
+class DiffusionDataset(Dataset):
+    def __init__(self, data_dir: str, traj_len: int, normalizer: Normalizer):
+        """
+        Args:
+            data_dir (str): Root dir where course/linear, course/u, etc exists
+            traj_len (int): Trajectory length to pad to (i.e. 12s = 360 points)
+            padding (int):  How much to pad trajectory with the consecutive / previous states
+        """
+
+        super().__init__()
+        self.data_dir = data_dir
+        self.normalizer = normalizer
+        self.traj_len = traj_len
+        self.data: list[str] = []
+        self._load_data()
+
+    def _load_data(self):
+        course_dir = os.path.join(self.data_dir, "courses", "diffusion")
+
+        for sample in os.listdir(course_dir):
+            self.data.append(os.path.join(course_dir, sample))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        data_filename = self.data[idx]
+
+        assert data_filename.endswith(".pkl")
+
+        with open(data_filename, "rb") as data_file:
+            sample = pickle.load(data_file)
+
+        x0 = sample["trajectory_slice"][:self.traj_len]
+        x0 = torch.tensor(x0, dtype=torch.float32)
+
+        c_global = sample["global_context"]
+        null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(c_global), 1))
+        c_global = np.vstack((c_global, null_tokens))
+
+        c_local = sample["local_context"]
+        c_local = np.hstack((c_local[-6:], np.zeros((6, 1))))
+
+        # c_global = c_global[:2]
+        # context = np.vstack((c_local, c_global))
+        # context = torch.tensor(context, dtype=torch.float32)
+
+        return {
+            "x_0": x0,
+            "local_conditioning": torch.tensor(c_local, dtype=torch.float32),
+            "global_conditioning": torch.tensor(c_global, dtype=torch.float32),
+        }
+
+    def __str__(self):
+        return f"DiffusionDataset({self.traj_len})"
+
+
 def evaluate_dataset(dataset: Dataset):
     """
     Get key stats about a dataset

@@ -63,7 +63,7 @@ for course_type in os.listdir(data_dir):
         valid_count = 0
 
         for traj_file in os.listdir(valid_path):
-            course_stats["total_samples"] += 2
+            course_stats["total_samples"] += 1
             if traj_file.endswith(".pkl"):
                 valid_count += 1
                 ttc = float(traj_file.split("_(")[-1].rstrip(").pkl"))
