@@ -17,7 +17,7 @@ from quadrotor_diffusion.models.attention import (
     Residual
 )
 from quadrotor_diffusion.utils.nn.args import Unet1DArgs
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 
 
 class ResNet1DBlock(nn.Module):
@@ -128,18 +128,33 @@ class Unet1D(nn.Module):
             ResNet1DBlock(c_mid, c_mid, t_embed_dim=features)
         ])
 
-        self.conditioning = None
-        if args.conditioning:
-            self.conditioning_embedding = nn.Sequential(
-                nn.Linear(4, c_mid // 2),
+        self.conditioning = args.conditioning is not None
+        if self.conditioning:
+            self.local_cond_embedding = nn.Sequential(
+                nn.Linear(args.conditioning[0], c_mid // 2),
                 nn.Mish(),
                 nn.Linear(c_mid // 2, c_mid),
             )
-            self.conditioning = Residual(PreNorm(c_mid, CrossAttention(c_mid, c_mid)))
+            self.local_cond_pos_embedding = nn.Sequential(
+                SinusoidalPosEmb(c_mid),
+                nn.Linear(c_mid, c_mid * 4),
+                nn.Mish(),
+                nn.Linear(4 * c_mid, c_mid),
+                Rearrange("n d -> 1 n d"),
+            )
+            self.local_conditioning = Residual(PreNorm(c_mid, CrossAttention(c_mid, c_mid)))
+
             self.global_conditioning_embedding = nn.Sequential(
-                nn.Linear(4, c_mid // 2),
+                nn.Linear(args.conditioning[1], c_mid // 2),
                 nn.Mish(),
                 nn.Linear(c_mid // 2, c_mid),
+            )
+            self.global_conditioning_pos_embedding = nn.Sequential(
+                SinusoidalPosEmb(c_mid),
+                nn.Linear(c_mid, c_mid * 4),
+                nn.Mish(),
+                nn.Linear(4 * c_mid, c_mid),
+                Rearrange("n d -> 1 n d"),
             )
             self.global_conditioning = Residual(PreNorm(c_mid, CrossAttention(c_mid, c_mid)))
 
@@ -186,16 +201,32 @@ class Unet1D(nn.Module):
         x = resnet0(x, t)
         x = attention(x)
 
-        if c is not None and self.conditioning is not None:
-            c_l = self.conditioning_embedding(c[0])
+        if c is not None and self.conditioning:
+            # [B, N_local, l_f] -> [B, N_local, c_mid]
+            c_l = self.local_cond_embedding(c[0])
+
+            # [N_local] -> [1, N_local, c_mid]
+            positions_local = torch.arange(c_l.shape[1], device=c_l.device)
+            positions_local = self.local_cond_pos_embedding(positions_local)
+
+            c_l = c_l + positions_local
             c_l = einops.rearrange(c_l, 'b n f -> b f n')
-            x = self.conditioning(x, c_l)
+            x = self.local_conditioning(x, c_l)
+
+            # [B, N_global, l_g] -> [B, N_global, c_mid]
             c_g = self.global_conditioning_embedding(c[1])
+
+            # [N_global] -> [1, N_global, c_mid]
+            positions_global = torch.arange(c_g.shape[1], device=c_g.device)
+            positions_global = self.global_conditioning_pos_embedding(positions_global)
+
+            c_g = c_g + positions_global
             c_g = einops.rearrange(c_g, 'b n f -> b f n')
             x = self.global_conditioning(x, c_g)
-        elif c is not None and self.conditioning is None:
-            raise ValueError("Need conditioning passed in")
-        elif c is None and self.conditioning is not None:
+
+        elif c is not None and not self.conditioning:
+            raise ValueError("Model doesn't use conditioning")
+        elif c is None and not self.conditioning:
             raise ValueError("Need conditioning in arguments")
 
         x = resnet1(x, t)

@@ -4,7 +4,7 @@ from dataclasses import dataclass, fields
 
 import numpy as np
 
-from quadrotor_diffusion.utils.logging import dataclass_to_table
+from quadrotor_diffusion.utils.quad_logging import dataclass_to_table
 
 
 # Path to the data directory

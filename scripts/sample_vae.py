@@ -16,7 +16,7 @@ from quadrotor_diffusion.utils.nn.args import TrainerArgs
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
 from quadrotor_diffusion.utils.file import get_checkpoint_file, load_course_trajectory, get_sample_folder
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 from quadrotor_diffusion.utils.simulator import play_trajectory, create_perspective_rendering
 from quadrotor_diffusion.utils.plotting import course_base_plot, add_gates_to_course, add_trajectory_to_course, plot_states, plot_reference_time_series
 from quadrotor_diffusion.utils.trajectory import derive_trajectory

@@ -15,7 +15,7 @@ import wandb
 import quadrotor_diffusion.utils.nn.ema as ema
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
-from quadrotor_diffusion.utils.logging import (
+from quadrotor_diffusion.utils.quad_logging import (
     dataclass_to_table,
     iprint as print
 )

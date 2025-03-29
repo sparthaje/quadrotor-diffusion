@@ -11,7 +11,7 @@ import wandb
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs, VAE_WrapperArgs, VAE_EncoderArgs, VAE_DecoderArgs
-from quadrotor_diffusion.utils.logging import dataclass_to_table
+from quadrotor_diffusion.utils.quad_logging import dataclass_to_table
 
 
 parser = argparse.ArgumentParser()

@@ -15,7 +15,7 @@ from quadrotor_diffusion.utils.nn.args import (
     Unet1DArgs,
     LatentDiffusionWrapperArgs,
 )
-from quadrotor_diffusion.utils.logging import dataclass_to_table, iprint as print
+from quadrotor_diffusion.utils.quad_logging import dataclass_to_table, iprint as print
 
 # TODO(shreepa): Probably should fix this at some point
 # Suppress FutureWarning for this specific issue
@@ -312,7 +312,7 @@ class LatentDiffusionWrapper(nn.Module):
         return self.diffusion.compute_loss(latent_trajectory, conditioning=(batch["local_conditioning"], batch["global_conditioning"]))
 
     @torch.no_grad()
-    def sample(self, batch_size: int, horizon: int, vae_downsample: int, device: str, local_conditioning: torch.Tensor, conditioning: torch.Tensor = None) -> torch.Tensor:
+    def sample(self, batch_size: int, horizon: int, vae_downsample: int, device: str, local_conditioning: torch.Tensor, global_conditioning: torch.Tensor = None) -> torch.Tensor:
         """
         1. Samples latents from pure noise using the reverse diffusion process.
         2. Decodes latents using the VAE decoder.
@@ -334,12 +334,12 @@ class LatentDiffusionWrapper(nn.Module):
 
         latent_horizon = horizon // vae_downsample
         null_conditioning = self.null_token.unsqueeze(0).expand(batch_size, -1, -1)
-        conditioning = conditioning.unsqueeze(0).expand(batch_size, -1, -1)
 
-        if conditioning is None:
+        if global_conditioning is None:
             c_tuple = (local_conditioning, null_conditioning)
         else:
-            c_tuple = (local_conditioning, conditioning, null_conditioning)
+            global_conditioning = global_conditioning.unsqueeze(0).expand(batch_size, -1, -1)
+            c_tuple = (local_conditioning, global_conditioning, null_conditioning)
 
         latent_trajectories = self.diffusion.sample(
             batch_size, latent_horizon, device, conditioning=c_tuple)

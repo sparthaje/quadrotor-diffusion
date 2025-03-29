@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
-from quadrotor_diffusion.utils.logging import dataclass_to_table
+from quadrotor_diffusion.utils.quad_logging import dataclass_to_table
 from quadrotor_diffusion.utils.file import get_checkpoint_file
 from quadrotor_diffusion.utils.plotting import create_course_grid
 

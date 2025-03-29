@@ -11,7 +11,7 @@ from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
-from quadrotor_diffusion.utils.logging import dataclass_to_table
+from quadrotor_diffusion.utils.quad_logging import dataclass_to_table
 from quadrotor_diffusion.utils.file import get_checkpoint_file
 from quadrotor_diffusion.utils.plotting import create_course_grid
 
@@ -83,7 +83,7 @@ while trainer.epoch < N_epochs:
         vae_downsample=vae_downsample,
         device=train_args.device,
         local_conditioning=local_conditioning,
-        conditioning=None,
+        global_conditioning=None,
     )
     local_conditioning = local_conditioning[:, :, :3]
 

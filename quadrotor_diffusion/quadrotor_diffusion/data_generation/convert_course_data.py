@@ -17,7 +17,7 @@ parser.add_argument('-d', '--debug', action='store_true', help="Turn on debug mo
 args = parser.parse_args()
 
 
-def process_one_example(filename: str, trajectory: PolynomialTrajectory, course: np.ndarray):
+def process_one_example(filename: str, trajectory: PolynomialTrajectory, course: np.ndarray, number_gates: int, cyclic: bool):
     """
     Takes trajectory and course and converts them to diffusion examples
     """
@@ -35,9 +35,12 @@ def process_one_example(filename: str, trajectory: PolynomialTrajectory, course:
 
     ref_pos_idx = LOCAL_CONTEXT_SIZE
 
-    for gate_idx in range(len(course)):
+    for gate_idx in range(number_gates):
         # All following gates up to the current gate (i.e. don't include current gate as part of global context)
-        global_context = np.vstack((course[gate_idx+1:], course[1:gate_idx]))
+        if cyclic:
+            global_context = np.vstack((course[gate_idx+1:], course[1:gate_idx]))
+        else:
+            global_context = course[gate_idx+1:-1]
 
         ending_gate = trajectory.states[gate_idx+1]
         ending_idx = np.argmin(
@@ -48,7 +51,7 @@ def process_one_example(filename: str, trajectory: PolynomialTrajectory, course:
             )
         )
 
-        local_context = trajectory_np[ref_pos_idx - LOCAL_CONTEXT_SIZE: ref_pos_idx]
+        local_context = trajectory_np[ref_pos_idx - LOCAL_CONTEXT_SIZE: ref_pos_idx+LOCAL_CONTEXT_SIZE]
         trajectory_slice = trajectory_np[ref_pos_idx:ref_pos_idx+TRAJECTORY_SLICE_LENGTH]
 
         with open(f"{filename}_{gate_idx}.pkl", 'wb') as file:
@@ -62,6 +65,21 @@ def process_one_example(filename: str, trajectory: PolynomialTrajectory, course:
 
 
 sample_num = 0
+n_gates = {
+    "linear": 4,
+    "u": 4,
+    "triangle": 4,
+    "pill": 5,
+    "square": 5,
+}
+cyclic = {
+    "linear": False,
+    "u": False,
+    "triangle": True,
+    "pill": True,
+    "square": True,
+}
+
 for course_type in args.courses:
     course_dir = os.path.join(args.base_dir, course_type)
     if not os.path.isdir(course_dir):
@@ -87,6 +105,6 @@ for course_type in args.courses:
                     with open(traj_filename, "rb") as trajectory_file:
                         trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
 
-                    filename = os.path.join(args.base_dir, "diffusion", f"{sample_num}")
-                    process_one_example(filename, trajectory, course)
+                    filename = os.path.join(args.base_dir, "diffusion2", f"{sample_num}")
+                    process_one_example(filename, trajectory, course, n_gates[course_type], cyclic[course_type])
                     sample_num += 1

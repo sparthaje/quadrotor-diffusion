@@ -16,7 +16,7 @@ unet_args = Unet1DArgs(
         [False, False]
     ],
     context_mlp="time",
-    conditioning=True
+    conditioning=(4, 4)
 )
 
 diff_args = LatentDiffusionWrapperArgs(
@@ -41,7 +41,7 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:0",
+    device="cuda:1",
     max_epochs=400,
     evaluate_every=5,
 )

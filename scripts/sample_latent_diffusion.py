@@ -14,7 +14,7 @@ from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 from quadrotor_diffusion.utils.plotting import plot_states,  plot_ref_obs_states, add_gates_to_course, add_trajectory_to_course, course_base_plot
 from quadrotor_diffusion.utils.simulator import play_trajectory, create_perspective_rendering
 from quadrotor_diffusion.utils.file import get_checkpoint_file, get_sample_folder, load_course_trajectory
@@ -103,16 +103,16 @@ null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(global_conditionin
 global_conditioning = np.vstack((global_conditioning, null_tokens))
 global_conditioning = torch.tensor(global_conditioning, dtype=torch.float32).to(args.device)
 
-print("Warming")
-torch.backends.cudnn.benchmark = True
-for i in range(25):
-    trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
-                                local_conditioning=local_conditioning, conditioning=global_conditioning)
-print("Finished warming")
+# print("Warming")
+# torch.backends.cudnn.benchmark = True
+# for i in range(25):
+#     trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
+#                                 local_conditioning=local_conditioning, global_conditioning=global_conditioning)
+# print("Finished warming")
 
 start = time.time()
 trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
-                            local_conditioning=local_conditioning, conditioning=global_conditioning).cpu()
+                            local_conditioning=local_conditioning, global_conditioning=global_conditioning).cpu()
 
 segments = []
 
@@ -133,7 +133,7 @@ for i in range(len(course) - 1):
     global_conditioning = torch.tensor(global_conditioning, dtype=torch.float32).to(args.device)
 
     trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
-                                local_conditioning=local_conditioning, conditioning=global_conditioning).cpu()
+                                local_conditioning=local_conditioning, global_conditioning=global_conditioning).cpu()
 
     trajectory = trajectories[score(trajectories, segments[-1][-1])].numpy()
     next_gate = gate_idx + 1 if gate_idx + 1 < len(course) else 1

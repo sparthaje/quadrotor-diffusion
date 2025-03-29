@@ -16,7 +16,7 @@ from quadrotor_diffusion.utils.plotting import (
     add_gates_to_course,
     add_trajectory_to_course
 )
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--course_type', type=str, help='Course types [linear, u, zigzag]', required=True)

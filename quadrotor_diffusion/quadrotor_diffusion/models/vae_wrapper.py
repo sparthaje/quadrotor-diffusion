@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import einops
 
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 from quadrotor_diffusion.models.losses import VAE_Loss, MSELoss, L1Loss, SmoothReconstructionLoss, WeightedL1Loss
 from quadrotor_diffusion.utils.nn.args import VAE_EncoderArgs, VAE_DecoderArgs, VAE_WrapperArgs
 from quadrotor_diffusion.models.attention import LinearAttention, Attention, Residual, PreNorm

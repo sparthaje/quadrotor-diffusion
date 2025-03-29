@@ -20,7 +20,7 @@ from quadrotor_diffusion.data_generation.shared_utils import (
 )
 from quadrotor_diffusion.utils.voxels import create_occupancy_map, collision_along_trajectory
 from quadrotor_diffusion.utils.trajectory import INITIAL_GATE_EXIT
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 from quadrotor_diffusion.utils.dataset.boundary_condition import State, State3D, PolynomialTrajectory
 
 

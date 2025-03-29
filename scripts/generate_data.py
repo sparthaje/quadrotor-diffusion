@@ -12,7 +12,7 @@ from quadrotor_diffusion.data_generation.triangle import generate_triangle
 from quadrotor_diffusion.data_generation.triangle import generate_triangle
 from quadrotor_diffusion.data_generation.pill import generate_pill
 from quadrotor_diffusion.data_generation.square import generate_square
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 
 MIN_VALID_TRAJECTORIES = 20
 

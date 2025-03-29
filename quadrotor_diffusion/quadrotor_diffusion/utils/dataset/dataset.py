@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer, NormalizerTuple
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
-from quadrotor_diffusion.utils.logging import iprint as print
+from quadrotor_diffusion.utils.quad_logging import iprint as print
 
 
 class QuadrotorRaceTrajectoryDataset(Dataset):
