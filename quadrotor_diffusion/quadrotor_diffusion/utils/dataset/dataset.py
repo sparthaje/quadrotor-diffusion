@@ -112,6 +112,14 @@ class QuadrotorRaceSegmentDataset(Dataset):
         self._load_data()
 
     def _load_data(self):
+        n_gates = {
+            "linear": 4,
+            "u": 4,
+            "triangle": 4,
+            "pill": 5,
+            "square": 5,
+        }
+
         for course_type in self.course_types:
             course_dir = os.path.join(self.data_dir, "courses", course_type)
             if not os.path.isdir(course_dir):
@@ -136,13 +144,30 @@ class QuadrotorRaceSegmentDataset(Dataset):
                             with open(traj_filename, "rb") as trajectory_file:
                                 trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
 
-                            gate_idx = 0
-                            for segment_length in trajectory.segment_lengths:
-                                self.data.append((traj_filename, gate_idx, gate_idx + self.traj_len))
-                                gate_idx += int(30 * segment_length)
+                            trajectory.states.append(trajectory.states[2])
+                            trajectory.segment_lengths.append(trajectory.segment_lengths[1])
+
+                            trajectory.states.append(trajectory.states[3])
+                            trajectory.segment_lengths.append(trajectory.segment_lengths[2])
+
+                            trajectory_np = trajectory.as_ref_pos(30)
+                            ref_pos_idx = 0
+
+                            for gate_idx in range(n_gates[course_type]):
+                                ending_gate = trajectory.states[gate_idx+1]
+                                ending_idx = np.argmin(
+                                    np.linalg.norm(
+                                        trajectory_np[ref_pos_idx:ref_pos_idx+self.traj_len] -
+                                        np.array([ending_gate.x.s, ending_gate.y.s, ending_gate.z.s]),
+                                        axis=1,
+                                    )
+                                )
+                                self.data.append((traj_filename, ref_pos_idx, ref_pos_idx+self.traj_len))
+
+                                ref_pos_idx += ending_idx
 
                             total_trajectory_length = int(sum(trajectory.segment_lengths) * 30)
-                            for _ in range(4):
+                            for _ in range(6):
                                 start = random.randint(0, total_trajectory_length - self.traj_len)
                                 end = start + self.traj_len
                                 self.data.append((traj_filename, start, end))
@@ -165,13 +190,23 @@ class QuadrotorRaceSegmentDataset(Dataset):
             trajectory.states.append(trajectory.states[3])
             trajectory.segment_lengths.append(trajectory.segment_lengths[2])
 
-        trajectory = trajectory.as_ref_pos()
-        if self.padding > 0:
-            starting_state = np.tile(trajectory[0], (self.padding, 1))
-            trajectory = np.vstack((starting_state, trajectory))
+            trajectory.states.append(trajectory.states[4])
+            trajectory.segment_lengths.append(trajectory.segment_lengths[2])
+
+        trajectory: np.ndarray = trajectory.as_ref_pos()
 
         trajectory = self.normalizer(trajectory)
-        return torch.tensor(trajectory[start:end+2*self.padding], dtype=torch.float32)
+
+        # Add the data around the starting and ending position of the trajectory as padding
+        if self.padding > 0:
+            trajectory = np.vstack((
+                np.tile(trajectory[0], (self.padding, 1)),
+                trajectory
+            ))
+
+            end += 2 * self.padding
+
+        return torch.tensor(trajectory[start:end], dtype=torch.float32)
 
     def __str__(self):
         return f"QuadrotorRaceSegmentDataset({self.course_types}, {self.traj_len}, {self.padding})"
@@ -194,7 +229,7 @@ class DiffusionDataset(Dataset):
         self._load_data()
 
     def _load_data(self):
-        course_dir = os.path.join(self.data_dir, "courses", "diffusion")
+        course_dir = os.path.join(self.data_dir, "courses", "diffusion2")
 
         for sample in os.listdir(course_dir):
             self.data.append(os.path.join(course_dir, sample))
@@ -214,11 +249,13 @@ class DiffusionDataset(Dataset):
         x0 = torch.tensor(x0, dtype=torch.float32)
 
         c_global = sample["global_context"]
-        null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(c_global), 1))
+        GLOBAL_CONTEXT_SIZE = 6
+        null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (GLOBAL_CONTEXT_SIZE - len(c_global), 1))
         c_global = np.vstack((c_global, null_tokens))
 
+        LOCAL_CONTEXT_SIZE = 6
         c_local = sample["local_context"]
-        c_local = np.hstack((c_local[-6:], np.zeros((6, 1))))
+        c_local = np.hstack((c_local[-LOCAL_CONTEXT_SIZE:], np.zeros((LOCAL_CONTEXT_SIZE, 1))))
 
         # c_global = c_global[:2]
         # context = np.vstack((c_local, c_global))

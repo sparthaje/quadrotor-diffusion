@@ -97,6 +97,7 @@ for course_type in args.courses:
 
         # Find valid trajectories
         valid_dir = os.path.join(sample_dir, "valid")
+        num_trajectories_in_course = 0
         if os.path.exists(valid_dir):
             for valid_file in os.listdir(valid_dir):
                 if valid_file.endswith(".pkl"):
@@ -108,3 +109,7 @@ for course_type in args.courses:
                     filename = os.path.join(args.base_dir, "diffusion2", f"{sample_num}")
                     process_one_example(filename, trajectory, course, n_gates[course_type], cyclic[course_type])
                     sample_num += 1
+                    num_trajectories_in_course += 1
+
+                    if not cyclic[course_type] and num_trajectories_in_course >= 10:
+                        break

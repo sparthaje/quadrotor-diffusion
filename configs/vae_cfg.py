@@ -19,11 +19,11 @@ train_args = TrainerArgs(
 
     learning_rate=2e-4,
     num_gpus=1,
-    device="cuda:3",
+    device="cuda:0",
 
     max_epochs=400,
     evaluate_every=5,
-    description="attention on mu/logvar + PeLU"
+    description="telomere strat 2"
 )
 
 vae_args = VAE_WrapperArgs(
@@ -36,7 +36,7 @@ vae_args = VAE_WrapperArgs(
         # Weighting for L1 loss on velocity and acceleration
         (0.3, 0.1),
     ),
-    telomere_strategy=1
+    telomere_strategy=2
 )
 
 encoder_args = VAE_EncoderArgs(
@@ -53,4 +53,4 @@ decoder_args = VAE_DecoderArgs(
     (8, 4, 2, 1)
 )
 
-dataset = QuadrotorRaceSegmentDataset('data', ["square", "triangle", "pill"], 112, 0, NoNormalizer())
+dataset = QuadrotorRaceSegmentDataset('data', ["square", "triangle", "pill"], 112, 8, NoNormalizer())
