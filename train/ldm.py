@@ -68,25 +68,26 @@ while trainer.epoch < N_epochs:
     idxs = np.random.choice(len(dataset), 5, replace=False)
     slices = []
     for i in idxs:
-        arr = dataset[i]["x_0"]
-        s1 = np.random.randint(0, arr.shape[0] - 6 + 1)
-        slices.append(arr[s1:s1+6])
-        slices.append(arr[s1:s1+6])
-    local_conditioning = np.stack(slices)
-    local_conditioning = np.concatenate([local_conditioning, np.zeros((10, 6, 1))], axis=-1)
-    local_conditioning = torch.tensor(local_conditioning, device=train_args.device, dtype=torch.float32)
+        c = dataset[i]["local_conditioning"].unsqueeze(0)
+        slices.append(c)
+        slices.append(c)
+
+    local_conditioning = torch.concat(slices).to(train_args.device)
+    global_conditioning = sampling_model.null_token_global.expand((10, 4, -1))
 
     # [10, n, 3]
+    horizon_padding = 0 if vae_wrapper.args[0].telomere_strategy == 0 else vae_downsample * 2
     sample_trajectories = sampling_model.sample(
         batch_size=10,
-        horizon=dataset[0]["x_0"].shape[0] + 16,
+        horizon=dataset[0]["x_0"].shape[0] + horizon_padding,
         vae_downsample=vae_downsample,
         device=train_args.device,
         local_conditioning=local_conditioning,
-        global_conditioning=None,
+        global_conditioning=global_conditioning,
     )
-    local_conditioning = local_conditioning[:, :, :3]
 
+    # Cut the local conditioning to only be the prior states
+    local_conditioning = local_conditioning[:, :-local_conditioning.shape[1] // 2, :]
     sample_trajectories = torch.concat((local_conditioning, sample_trajectories), dim=1)
 
     fig, axes = create_course_grid(sample_trajectories)

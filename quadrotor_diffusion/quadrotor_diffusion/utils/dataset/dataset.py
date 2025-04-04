@@ -249,17 +249,15 @@ class DiffusionDataset(Dataset):
         x0 = torch.tensor(x0, dtype=torch.float32)
 
         c_global = sample["global_context"]
-        GLOBAL_CONTEXT_SIZE = 6
+        GLOBAL_CONTEXT_SIZE = 4
         null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (GLOBAL_CONTEXT_SIZE - len(c_global), 1))
         c_global = np.vstack((c_global, null_tokens))
 
-        LOCAL_CONTEXT_SIZE = 6
+        PRIOR_STATES = 3
+        FORWARD_STATES = 3
         c_local = sample["local_context"]
-        c_local = np.hstack((c_local[-LOCAL_CONTEXT_SIZE:], np.zeros((LOCAL_CONTEXT_SIZE, 1))))
-
-        # c_global = c_global[:2]
-        # context = np.vstack((c_local, c_global))
-        # context = torch.tensor(context, dtype=torch.float32)
+        STARTING_IDX = c_local.shape[0] // 2
+        c_local = c_local[STARTING_IDX-PRIOR_STATES:STARTING_IDX+FORWARD_STATES]
 
         return {
             "x_0": x0,

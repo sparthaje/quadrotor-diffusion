@@ -42,14 +42,14 @@ class LatentDiffusionWrapperArgs:
     loss_params: Tuple of data to pass into lsoss initialization varies by loss
     n_timesteps: Number of diffusion timesteps
     dropout: Conditional dropout (probability of training without null token)
-    conditioning_shape: Shape of conditioning tensors in dataset
+    conditioning_shape: Dimension of local, global conditioning tensors in dataset
     """
     predict_epsilon: bool
     loss: str
     loss_params: Tuple
     n_timesteps: int
     dropout: float
-    conditioning_shape: tuple[int]
+    conditioning_shape: tuple[int, int]
 
 
 @dataclass

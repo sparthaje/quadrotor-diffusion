@@ -16,7 +16,7 @@ unet_args = Unet1DArgs(
         [False, False]
     ],
     context_mlp="time",
-    conditioning=(4, 4)
+    conditioning=(3, 4)  # not number of tokens but dimension of each token (local, global)
 )
 
 diff_args = LatentDiffusionWrapperArgs(
@@ -24,8 +24,8 @@ diff_args = LatentDiffusionWrapperArgs(
     loss="L1Loss",
     n_timesteps=100,
     loss_params=None,
-    dropout=0.2,
-    conditioning_shape=(6, 4)
+    dropout=0.15,
+    conditioning_shape=(3, 4)
 )
 
 train_args = TrainerArgs(
@@ -41,7 +41,7 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:1",
+    device="cuda:2",
     max_epochs=400,
     evaluate_every=5,
 )
