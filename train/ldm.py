@@ -76,10 +76,9 @@ while trainer.epoch < N_epochs:
     global_conditioning = sampling_model.null_token_global.expand((10, 4, -1))
 
     # [10, n, 3]
-    horizon_padding = 0 if vae_wrapper.args[0].telomere_strategy == 0 else vae_downsample * 2
     sample_trajectories = sampling_model.sample(
         batch_size=10,
-        horizon=dataset[0]["x_0"].shape[0] + horizon_padding,
+        horizon=dataset[0]["x_0"].shape[0],
         vae_downsample=vae_downsample,
         device=train_args.device,
         local_conditioning=local_conditioning,
@@ -87,7 +86,6 @@ while trainer.epoch < N_epochs:
     )
 
     # Cut the local conditioning to only be the prior states
-    local_conditioning = local_conditioning[:, :-local_conditioning.shape[1] // 2, :]
     sample_trajectories = torch.concat((local_conditioning, sample_trajectories), dim=1)
 
     fig, axes = create_course_grid(sample_trajectories)

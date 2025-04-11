@@ -245,19 +245,23 @@ class DiffusionDataset(Dataset):
         with open(data_filename, "rb") as data_file:
             sample = pickle.load(data_file)
 
-        x0 = sample["trajectory_slice"][:self.traj_len]
+        PRIOR_STATES = 6
+        FORWARD_STATES = 0
+        c_local = sample["local_context"]
+        STARTING_IDX = c_local.shape[0] // 2
+        c_local = c_local[STARTING_IDX-PRIOR_STATES:STARTING_IDX+FORWARD_STATES]
+
+        PADDING = 0
+        x0 = np.vstack((
+            sample["local_context"][STARTING_IDX - PADDING:STARTING_IDX, :],
+            sample["trajectory_slice"][:self.traj_len-PADDING]
+        ))
         x0 = torch.tensor(x0, dtype=torch.float32)
 
         c_global = sample["global_context"]
         GLOBAL_CONTEXT_SIZE = 4
         null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (GLOBAL_CONTEXT_SIZE - len(c_global), 1))
         c_global = np.vstack((c_global, null_tokens))
-
-        PRIOR_STATES = 3
-        FORWARD_STATES = 3
-        c_local = sample["local_context"]
-        STARTING_IDX = c_local.shape[0] // 2
-        c_local = c_local[STARTING_IDX-PRIOR_STATES:STARTING_IDX+FORWARD_STATES]
 
         return {
             "x_0": x0,

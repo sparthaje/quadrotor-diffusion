@@ -24,7 +24,7 @@ diff_args = LatentDiffusionWrapperArgs(
     loss="L1Loss",
     n_timesteps=100,
     loss_params=None,
-    dropout=0.15,
+    dropout=0.2,
     conditioning_shape=(3, 4)
 )
 
@@ -44,10 +44,11 @@ train_args = TrainerArgs(
     device="cuda:2",
     max_epochs=400,
     evaluate_every=5,
+    description="Training wi1h 174 VAE"
 )
 
-vae_experiment = 157
+vae_experiment = 174
 
 normalizer = NoNormalizer()
 
-dataset = DiffusionDataset("data", 112, normalizer)
+dataset = DiffusionDataset("data", 128, normalizer)

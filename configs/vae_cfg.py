@@ -19,7 +19,7 @@ train_args = TrainerArgs(
 
     learning_rate=2e-4,
     num_gpus=1,
-    device="cuda:0",
+    device="cuda:1",
 
     max_epochs=400,
     evaluate_every=5,
@@ -28,7 +28,7 @@ train_args = TrainerArgs(
 
 vae_args = VAE_WrapperArgs(
     loss="Smooth",
-    beta=0.25,
+    beta=0.1,
     loss_params=(
         "WeightedL1",
         # Weighting on the percent of horizon
@@ -36,21 +36,21 @@ vae_args = VAE_WrapperArgs(
         # Weighting for L1 loss on velocity and acceleration
         (0.3, 0.1),
     ),
-    telomere_strategy=2
+    telomere_strategy=0
 )
 
 encoder_args = VAE_EncoderArgs(
     3,
-    12,
+    6,
     128,
     (1, 2, 4, 8),
 )
 
 decoder_args = VAE_DecoderArgs(
     3,
-    12,
+    6,
     128,
     (8, 4, 2, 1)
 )
 
-dataset = QuadrotorRaceSegmentDataset('data', ["square", "triangle", "pill"], 112, 8, NoNormalizer())
+dataset = QuadrotorRaceSegmentDataset('data', ["square", "triangle", "pill"], 128, 0, NoNormalizer())

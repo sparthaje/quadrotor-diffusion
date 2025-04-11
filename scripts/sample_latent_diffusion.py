@@ -29,6 +29,7 @@ parser.add_argument('-c', '--course', type=str, help='Sample (course_type,course
 parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is biggest', default=None)
 parser.add_argument('-d', '--device', type=str, help='Device to use', default="cuda")
 parser.add_argument('-m', '--no_ema', action='store_true', help="Use normal model instead of ema model.")
+parser.add_argument('-w', '--warm', action='store_true', help="Run cudnn benchmark for speedups.")
 
 args = parser.parse_args()
 sys.argv = [sys.argv[0]]
@@ -61,7 +62,7 @@ diff, ema, normalizer, trainer_args = Trainer.load(chkpt)
 print(f"Loaded {chkpt}")
 print(f"Using {normalizer}")
 
-vae_experiment: int = 157
+vae_experiment: int = 174
 chkpt = get_checkpoint_file("logs/training", vae_experiment)
 vae_wrapper: VAE_Wrapper = None
 vae_wrapper, _, _, _ = Trainer.load(chkpt, get_ema=False)
@@ -71,8 +72,6 @@ vae_downsample = 2 ** (len(vae_wrapper.args[1].channel_mults) - 1)
 model = diff if args.no_ema else ema
 model.decoder = vae_wrapper.decode
 model.to(args.device)
-
-# Generate first segment from starting point to gate 1
 
 
 def score(trajectories: torch.Tensor, initial_position: np.array) -> int:
@@ -96,19 +95,21 @@ def score(trajectories: torch.Tensor, initial_position: np.array) -> int:
 
 
 local_conditioning = torch.tensor(np.tile(course[0], (6, 1)), dtype=torch.float32).to(args.device)
-local_conditioning = local_conditioning.unsqueeze(0).expand((args.samples, -1, -1))
+# Discard the yaw component for local conditioning
+local_conditioning = local_conditioning.unsqueeze(0).expand((args.samples, -1, -1))[:, :, :3]
 
 global_conditioning = np.vstack((course[1:], course[1:0]))
 null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(global_conditioning), 1))
 global_conditioning = np.vstack((global_conditioning, null_tokens))
 global_conditioning = torch.tensor(global_conditioning, dtype=torch.float32).to(args.device)
 
-# print("Warming")
-# torch.backends.cudnn.benchmark = True
-# for i in range(25):
-#     trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
-#                                 local_conditioning=local_conditioning, global_conditioning=global_conditioning)
-# print("Finished warming")
+if args.warm:
+    print("Warming")
+    torch.backends.cudnn.benchmark = True
+    for i in range(25):
+        trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
+                                    local_conditioning=local_conditioning, global_conditioning=global_conditioning)
+    print("Finished warming")
 
 start = time.time()
 trajectories = model.sample(args.samples, 128, vae_downsample, args.device,

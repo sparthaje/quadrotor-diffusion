@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 
-def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
+def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32) -> torch.Tensor:
     """
     Generates a cosine-based beta schedule as proposed in 
     https://openreview.net/forum?id=-NEXDKk8gZ.
@@ -31,3 +31,7 @@ def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
     betas_clipped = np.clip(betas, a_min=0, a_max=0.999)
 
     return torch.tensor(betas_clipped, dtype=dtype)
+
+
+def stable_diffusion(timesteps, dtype=torch.float32) -> torch.Tensor:
+    pass

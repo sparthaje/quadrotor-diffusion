@@ -72,7 +72,7 @@ def derive_trajectory(data: np.array, ctrl_freq: int, order: int = 1):
     delta_t = 1/ctrl_freq
     deltas = np.diff(data, axis=0)
     derivatives = deltas / delta_t
-    derivatives = np.row_stack((np.zeros(data.shape[1]), derivatives))
+    derivatives = np.row_stack((derivatives))
 
     return derive_trajectory(derivatives, ctrl_freq, order - 1)
 

@@ -28,6 +28,9 @@ def process_one_example(filename: str, trajectory: PolynomialTrajectory, course:
     trajectory.states.append(trajectory.states[3])
     trajectory.segment_lengths.append(trajectory.segment_lengths[2])
 
+    trajectory.states.append(trajectory.states[4])
+    trajectory.segment_lengths.append(trajectory.segment_lengths[3])
+
     trajectory_np = trajectory.as_ref_pos(30)
 
     row_0 = np.tile(trajectory_np[0], (LOCAL_CONTEXT_SIZE, 1))

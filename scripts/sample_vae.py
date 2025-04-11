@@ -132,7 +132,6 @@ plot_reference_time_series(
 recon_sim_filename = os.path.join(sample_dir, "reconstructed.mp4")
 recon_works, drone_states_recon = play_trajectory(ref_pos=fitted[0], ref_vel=fitted[1], ref_acc=fitted[2])
 print(f"Finished simulation on reconstructed data {'succesfully' if recon_works else 'unsuccesfully'}")
-create_perspective_rendering(drone_states_recon, course, recon_sim_filename, ref_pos)
 collision = collision_along_trajectory(drone_states_recon[0], occupancy_map, VOXEL_SIZE)
 print(f"On reconstructed data had {'no' if not collision else 'a'} collision")
 
@@ -143,9 +142,11 @@ plot_reference_time_series(
     drone_states_recon[0],
 )
 
-_, ax = course_base_plot()
-add_gates_to_course(course, ax)
-add_trajectory_to_course(fitted[0], velocity_profile=fitted[1])
-add_trajectory_to_course(ref_pos, reference=True)
+_, axs = course_base_plot()
+add_gates_to_course(course, axs)
+add_trajectory_to_course(axs, fitted[0], velocity_profile=fitted[1])
+add_trajectory_to_course(axs, ref_pos, reference=True)
 trajectory_fig_filename = os.path.join(sample_dir, "trajectories.pdf")
 plt.savefig(trajectory_fig_filename)
+
+create_perspective_rendering(drone_states_recon, course, recon_sim_filename, ref_pos)

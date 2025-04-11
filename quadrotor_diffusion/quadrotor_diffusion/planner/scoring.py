@@ -1,0 +1,67 @@
+import torch
+
+# Threshold between projected x_{i-1} and x_0 in planned trajectory to be acceptable
+THRESHOLD_FOR_INITIAL_STATE = 0.1  # [m]
+
+# Threshold to be considered passing gate safely
+THRESHOLD_FOR_GATE = 0.15  # [m]
+
+
+def filter_valid_trajectories(
+    trajectories: torch.Tensor,
+    x_0: torch.Tensor,
+    g_i: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Filters trajectories to ones which have a valid starting state and cross the next gate
+
+    Args:
+        trajectories (torch.Tensor): [B, N, 3] (trajectory length N)
+        x_0 (torch.Tensor): Expected next state [n, 3] (i.e. x_{i-1} + v_{i-1} * t + a_{i-1} * t^2 / 2)
+        g_i (torch.Tensor): Next gate [x, y, z]
+
+    Returns:
+        torch.Tensor: Indexes in trajectories which are valid
+    """
+    dists0 = torch.norm(trajectories[:, 0, :] - x_0, dim=-1)
+    filtered_idxs = torch.nonzero(dists0 < THRESHOLD_FOR_INITIAL_STATE, as_tuple=True)[0]
+    if len(filtered_idxs) == 0:
+        raise ValueError("Planner Failed Initial State")
+
+    filtered_trajectories = trajectories[filtered_idxs]
+    dists_gate = torch.norm(filtered_trajectories - g_i, dim=-1)
+    min_dists_gate, _ = torch.min(dists_gate, dim=1)
+
+    filtered_idxs = filtered_idxs[min_dists_gate <= THRESHOLD_FOR_GATE]
+    if len(filtered_idxs) == 0:
+        raise ValueError("Planner Failed Goal")
+
+    return filtered_idxs
+
+
+def fastest(
+    trajectories: torch.Tensor,
+) -> torch.Tensor:
+    """
+
+    Args:
+        trajectories (torch.Tensor): [B, N, 3]
+
+    Returns:
+        torch.Tensor: Idx of the fastest trajectory
+    """
+    # Euclidean distance between first and last point
+    diff = torch.norm(trajectories[:, 0, :] - trajectories[:, -1, :], dim=-1)
+    return torch.argmax(diff)
+
+
+def slowest(
+    trajectories: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Returns:
+        torch.Tensor: Idx of the slowest trajectory
+    """
+    # Euclidean distance between first and last point
+    diff = torch.norm(trajectories[:, 0, :] - trajectories[:, -1, :], dim=-1)
+    return torch.argmin(diff)

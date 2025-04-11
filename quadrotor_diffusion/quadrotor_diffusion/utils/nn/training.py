@@ -2,7 +2,7 @@ import os
 import copy
 import time
 from datetime import datetime
-from typing import Tuple
+from typing import Tuple, Union
 import warnings
 from dataclasses import asdict
 
@@ -94,6 +94,13 @@ class Trainer:
         print(f"Forward pass succeeded in {duration:.2f}s")
         return loss
 
+    def get_loss_dict(self, batch: Union[torch.Tensor, dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        """
+        Compute the loss for a single batch of data.
+        """
+        return self.model.module.compute_loss(batch, epoch=self.epoch) if isinstance(
+            self.model, nn.DataParallel) else self.model.compute_loss(batch, epoch=self.epoch)
+
     def train(self):
         while self.args.max_epochs is None or self.epoch < self.args.max_epochs:
             epoch_losses = {}
@@ -109,8 +116,7 @@ class Trainer:
 
                 self.batches_seen += 1
 
-                loss_dict = self.model.module.compute_loss(batch, epoch=self.epoch) if isinstance(
-                    self.model, nn.DataParallel) else self.model.compute_loss(batch, epoch=self.epoch)
+                loss_dict = self.get_loss_dict(batch)
 
                 # Average loss per sample in batch
                 loss = loss_dict["loss"]

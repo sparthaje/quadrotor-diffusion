@@ -290,23 +290,31 @@ def plot_ref_obs_states(
         plt.show()
 
 
-def course_base_plot() -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
-    """Creates base plot for course
+def course_base_plot() -> tuple[matplotlib.figure.Figure, tuple[matplotlib.axes.Axes, matplotlib.axes.Axes]]:
+    """Create base plot with two vertically aligned subplots.
+
+    Top subplot: XY perspective with x in [-1.5, 1.5] and y in [-2, 2].
+    Bottom subplot: XZ perspective with x in [-1.5, 1.5] and z in [0, 1].
+    Both plots share the same width and have equal aspect ratios.
 
     Returns:
-        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+        Tuple containing the Figure and a tuple of Axes.
     """
-    # Set up the figure and axes
-    fig, ax = plt.subplots(figsize=(8, 10))
-    ax.set_xlim(-1.5, 1.5)
-    ax.set_ylim(-2, 2)
-    ax.set_aspect('equal')
+    fig = plt.figure(figsize=(6, 10))
+    gs = fig.add_gridspec(2, 1, height_ratios=[4, 1])
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[1, 0])
+    ax1.set_xlim(-1.5, 1.5)
+    ax1.set_ylim(-2, 2)
+    ax2.set_xlim(-1.5, 1.5)
+    ax2.set_ylim(0, 1)
+    ax1.set_aspect('equal', adjustable='box')
+    ax2.set_aspect('equal', adjustable='box')
 
-    ax.set_xticks(np.arange(-1.5, 1.6, 1))
-    ax.set_yticks(np.arange(-2, 2.1, 1))
-    ax.grid(which='both', linestyle='--', linewidth=0.5)
-
-    return fig, ax
+    ax2.set_xlabel("X (m)")
+    ax1.set_ylabel("Y (m)")
+    ax2.set_ylabel("Z (m)")
+    return fig, (ax1, ax2)
 
 
 class GateLegendHandler(HandlerBase):
@@ -342,7 +350,7 @@ class GateLegendHandler(HandlerBase):
         return [rect, left_circle, right_circle]
 
 
-def add_gates_to_course(course: list[np.array], ax: plt.Axes, has_end=True):
+def add_gates_to_course(course: list[np.array], axs: list[plt.Axes], has_end=True):
     """
     Adds a list of gates to the plot
 
@@ -357,31 +365,44 @@ def add_gates_to_course(course: list[np.array], ax: plt.Axes, has_end=True):
         t = plt.matplotlib.transforms.Affine2D()
         t.rotate(yaw)
         t.translate(x, y)
-        rect.set_transform(t + ax.transData)
-        ax.add_patch(rect)
+        rect.set_transform(t + axs[0].transData)
+        axs[0].add_patch(rect)
 
         circle_color = 'black' if z == 0.525 else 'white'
         left_circle = patches.Circle((-0.25 - 0.025, 0), 0.025, edgecolor='black',
-                                     facecolor=circle_color, transform=t + ax.transData)
+                                     facecolor=circle_color, transform=t + axs[0].transData)
         right_circle = patches.Circle((0.25 + 0.025, 0), 0.025, edgecolor='black',
-                                      facecolor=circle_color, transform=t + ax.transData)
-        ax.add_patch(left_circle)
-        ax.add_patch(right_circle)
+                                      facecolor=circle_color, transform=t + axs[0].transData)
+        axs[0].add_patch(left_circle)
+        axs[0].add_patch(right_circle)
 
         arrow = patches.FancyArrow(0, 0, 0, 0.05, width=0.02, head_width=0.05,
-                                   head_length=0.05, color='black', transform=t + ax.transData)
-        ax.add_patch(arrow)
+                                   head_length=0.05, color='black', transform=t + axs[0].transData)
+        axs[0].add_patch(arrow)
+
+        rect = patches.Rectangle((-0.25, -0.05), 0.5, 0.1, edgecolor='black', facecolor='white', alpha=0.8)
+        t = plt.matplotlib.transforms.Affine2D()
+        t.rotate(np.pi/2)
+        t.translate(x, z)
+        rect.set_transform(t + axs[1].transData)
+        axs[1].add_patch(rect)
 
     starting_face_color = 'black' if course[0][2] == 0.525 else 'white'
     ending_face_color = 'black' if course[-1][2] == 0.525 else 'white'
-    ax.scatter([course[0][0]], [course[0][1]], s=100, marker='*', facecolor=starting_face_color, edgecolor='black')
+    axs[0].scatter([course[0][0]], [course[0][1]], s=100, marker='*', facecolor=starting_face_color, edgecolor='black')
     if has_end:
-        ax.scatter([course[-1][0]], [course[-1][1]], s=100, marker='o', facecolor=ending_face_color, edgecolor='black')
+        axs[0].scatter([course[-1][0]], [course[-1][1]], s=100, marker='o',
+                       facecolor=ending_face_color, edgecolor='black')
+
+    axs[1].scatter([course[0][0]], [course[0][2]], s=100, marker='*', facecolor=starting_face_color, edgecolor='black')
+    if has_end:
+        axs[1].scatter([course[-1][0]], [course[-1][2]], s=100, marker='o',
+                       facecolor=ending_face_color, edgecolor='black')
 
     high_patch = patches.Patch(color='none', label="High Gate (0.525 m)")
     low_patch = patches.Patch(color='none', label="Low Gate (0.3 m)")
 
-    ax.legend(
+    axs[0].legend(
         handles=[high_patch, low_patch],
         handler_map={
             high_patch: GateLegendHandler('white', 'black', 'black'),
@@ -394,7 +415,7 @@ def add_gates_to_course(course: list[np.array], ax: plt.Axes, has_end=True):
     )
 
 
-def get_render_map(ref_vel: np.ndarray, max_point_size: float, min_point_size: float) -> tuple[list[float], list[str]]:
+def get_render_map(ref_vel: np.ndarray, max_point_size: float, min_point_size: float) -> tuple[np.array, list[str]]:
     """
     Returns point sizes and colors for trajectory rendering (2d/3d)
 
@@ -420,11 +441,12 @@ def get_render_map(ref_vel: np.ndarray, max_point_size: float, min_point_size: f
     return point_sizes, colormap(norm(timestamps))
 
 
-def add_trajectory_to_course(trajectory: Union[PolynomialTrajectory, np.ndarray], velocity_profile=None, reference=False):
+def add_trajectory_to_course(axs: list[plt.Axes], trajectory: Union[PolynomialTrajectory, np.ndarray], velocity_profile=None, reference=False):
     """
     Add trajectory to a BEV gate plot with plt
 
     Args:
+        axs (list[plt.Axes]): Axes to plot on
         trajectory (Union[PolynomialTrajectory, np.ndarray]): Trajectory to pot
         velocity_profile (_type_, optional): Velocity profile for trajectory. Defaults to deriving the given trajectory.
         reference (bool, optional): Draw the trajectory as a red reference line. Defaults to False.
@@ -438,25 +460,17 @@ def add_trajectory_to_course(trajectory: Union[PolynomialTrajectory, np.ndarray]
 
     MIN_POINT_SIZE = 5
     MAX_POINT_SIZE = 125
+    ref_pos = ref_pos[:-1, :]
     point_sizes, colors = get_render_map(ref_vel, MAX_POINT_SIZE, MIN_POINT_SIZE)
 
-    # This code shows where a trajectory violates GV limits
-    # ref_acc = derive_trajectory(ref_vel, ctrl_freq=30)
-    # colors = []
-    # for v, a in zip(ref_vel, ref_acc):
-    #     limit = -0.3 * (np.linalg.norm(v) ** 3) + 2.0
-    #     acc_towards_vel = np.dot(v, a) > 0
-
-    #     if np.linalg.norm(a) > limit and acc_towards_vel:
-    #         colors.append('red')
-    #         continue
-
-    #     colors.append('blue')
-
     if reference:
-        plt.plot(ref_pos[:, 0], ref_pos[:, 1], c='red', linewidth=2)
+        axs[0].plot(ref_pos[:, 0], ref_pos[:, 1], c='red', linewidth=2)
+        if len(axs) > 1:
+            axs[1].plot(ref_pos[:, 0], ref_pos[:, 2], c='red', linewidth=0.5)
     else:
-        plt.scatter(ref_pos[:, 0], ref_pos[:, 1], s=point_sizes, c=colors, marker='o', alpha=0.8)
+        axs[0].scatter(ref_pos[:, 0], ref_pos[:, 1], s=point_sizes, c=colors, marker='o', alpha=0.8)
+        if len(axs) > 1:
+            axs[1].scatter(ref_pos[:, 0], ref_pos[:, 2], s=0.1*point_sizes, c=colors, marker='o', alpha=0.8)
 
 
 def create_course_grid(trajectories: torch.Tensor) -> tuple[plt.Figure, np.ndarray]:
@@ -483,7 +497,7 @@ def create_course_grid(trajectories: torch.Tensor) -> tuple[plt.Figure, np.ndarr
         trajectory_np = trajectory.detach().cpu().numpy() if isinstance(trajectory, torch.Tensor) else trajectory
 
         plt.sca(ax)
-        add_trajectory_to_course(trajectory_np)
+        add_trajectory_to_course([ax], trajectory_np)
 
         ax.set_title(f'Trajectory {idx + 1}')
 

@@ -131,9 +131,16 @@ class DiffusionWrapper(nn.Module):
             alpha_bar_t_prev = self.alpha_bar[t - 1] if t > 0 else torch.tensor(1.0, device=device)
 
             if conditioning is not None:
-                eps_c = self.model(x_t, time_t, conditioning[0])
-                eps_null = self.model(x_t, time_t, conditioning[1])
-                w = 0.2
+                x_t_tiled = x_t.repeat(2, 1, 1)
+                time_t_tiled = time_t.repeat(2)
+                conditioning_0 = conditioning[0][0].repeat(2, 1, 1)
+                conditioning_1 = torch.cat((conditioning[0][1], conditioning[1][1]))
+
+                eps = self.model(x_t_tiled, time_t_tiled, (conditioning_0, conditioning_1))
+                eps_c = eps[:eps.shape[0]//2, :, :]
+                eps_null = eps[eps.shape[0]//2:, :, :]
+
+                w = 0
                 model_output = (1 + w) * eps_c - w * eps_null
             else:
                 model_output = self.model(x_t, time_t, None)
