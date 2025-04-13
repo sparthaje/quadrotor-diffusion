@@ -1,10 +1,25 @@
+import enum
 import torch
 
 # Threshold between projected x_{i-1} and x_0 in planned trajectory to be acceptable
-THRESHOLD_FOR_INITIAL_STATE = 0.1  # [m]
+THRESHOLD_FOR_INITIAL_STATE = 0.075  # [m]
 
 # Threshold to be considered passing gate safely
 THRESHOLD_FOR_GATE = 0.15  # [m]
+
+
+class ScoringMethod(enum.Enum):
+    # Chooses the fastest trajectory
+    FAST = "fast"
+
+    # Chooses the slowest trajectory
+    SLOW = "slow"
+
+    # Chooses trajectory with highest curvature
+    CURVATURE = "curvature"
+
+    # Chooses trajectory with lowest curvature
+    STRAIGHT = "straight"
 
 
 def filter_valid_trajectories(
@@ -50,9 +65,8 @@ def fastest(
     Returns:
         torch.Tensor: Idx of the fastest trajectory
     """
-    # Euclidean distance between first and last point
-    diff = torch.norm(trajectories[:, 0, :] - trajectories[:, -1, :], dim=-1)
-    return torch.argmax(diff)
+    distances = torch.norm(trajectories[:, 1:] - trajectories[:, :-1], dim=2).sum(dim=1)
+    return torch.argmax(distances)
 
 
 def slowest(
@@ -62,6 +76,22 @@ def slowest(
     Returns:
         torch.Tensor: Idx of the slowest trajectory
     """
-    # Euclidean distance between first and last point
-    diff = torch.norm(trajectories[:, 0, :] - trajectories[:, -1, :], dim=-1)
-    return torch.argmin(diff)
+    distances = torch.norm(trajectories[:, 1:] - trajectories[:, :-1], dim=2).sum(dim=1)
+    return torch.argmin(distances)
+
+
+def min_curvature(trajectories: torch.Tensor) -> torch.Tensor:
+    """
+    Args:
+        trajectories (torch.Tensor): [B, N, 3]
+
+    Returns:
+        torch.Tensor: The trajectory index with the least curvature
+    """
+    segments = trajectories[:, 1:] - trajectories[:, :-1]
+    norms = segments.norm(dim=2, keepdim=True)
+    unit_segments = segments / (norms + 1e-8)
+    dots = (unit_segments[:, 1:] * unit_segments[:, :-1]).sum(dim=2).clamp(-1, 1)
+    angles = torch.acos(dots)
+    avg_curvature = angles.mean(dim=1)
+    return torch.argmin(avg_curvature)

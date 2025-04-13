@@ -1,7 +1,9 @@
 import warnings
 import random
+import enum
 from typing import Tuple, Callable
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,6 +22,12 @@ from quadrotor_diffusion.utils.quad_logging import dataclass_to_table, iprint as
 # TODO(shreepa): Probably should fix this at some point
 # Suppress FutureWarning for this specific issue
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*torch.load.*weights_only=False.*")
+
+
+class SamplerType(enum.Enum):
+    DDPM = "ddpm"
+    DDIM = "ddim"
+    CONSISTENCY = "consistency"
 
 
 class DiffusionWrapper(nn.Module):
@@ -168,6 +176,82 @@ class DiffusionWrapper(nn.Module):
 
         return x_t.detach()
 
+    @torch.no_grad()
+    def sample_ddim(self,
+                    batch_size: int,
+                    horizon: int,
+                    device: str,
+                    S: int,
+                    conditioning: tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] = None,
+                    ) -> torch.Tensor:
+        """
+        Sample with DDIM
+
+        Args:
+            batch_size (int): Number of samples to generate
+            horizon (int): Length of the trajectory
+            device (str): device
+            S (int): Number of steps to take
+            conditioning: If the model is trained to use conditioning pass in the conditioning to the model. Default none = no passed on data
+                          If provided first tuple should be conditioning second should be none null
+
+        Returns:
+            torch.Tensor: Trajectories
+        """
+
+        # Start from pure noise
+        x_t = torch.randn((batch_size, horizon, self.unet_args.traj_dim), device=device)
+
+        # https://arxiv.org/pdf/2305.08891
+
+        # Leading (from stable diffusion)
+        timesteps = np.arange(0, self.n_timesteps - 1, int(self.n_timesteps / S))
+        timesteps = np.append(np.array([-1]), timesteps)
+
+        # Linspace iDDPM
+        timesteps = np.round(np.linspace(0, self.n_timesteps - 1, S)).astype(int)
+        timesteps = np.append(np.array([-1]), timesteps)
+
+        # Trailing DPM
+        # timesteps = np.round(np.flip(np.arange(self.n_timesteps - 1, -1, -self.n_timesteps / S))).astype(int)
+        # timesteps = np.append(np.array([-1]), timesteps)
+
+        # Iteratively denoise the samples
+        for t, t_prev in zip(reversed(timesteps), reversed(timesteps[:-1])):
+            time_t = torch.ones(batch_size, device=device).long() * t
+            alpha_bar_t = self.alpha_bar[t]
+            alpha_bar_t_prev = self.alpha_bar[t_prev] if t > 0 else torch.tensor(1.0, device=device)
+
+            if conditioning is not None:
+                x_t_tiled = x_t.repeat(2, 1, 1)
+                time_t_tiled = time_t.repeat(2)
+                conditioning_0 = conditioning[0][0].repeat(2, 1, 1)
+                conditioning_1 = torch.cat((conditioning[0][1], conditioning[1][1]))
+
+                eps = self.model(x_t_tiled, time_t_tiled, (conditioning_0, conditioning_1))
+                eps_c = eps[:eps.shape[0]//2, :, :]
+                eps_null = eps[eps.shape[0]//2:, :, :]
+
+                w = 0.5
+                model_output = (1 + w) * eps_c - w * eps_null
+            else:
+                model_output = self.model(x_t, time_t, None)
+
+            # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
+            if self.predict_epsilon:
+                x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * model_output) / torch.sqrt(alpha_bar_t)
+
+            # Otherwise just use predicted \hat{x_0}
+            else:
+                raise NotImplementedError("whoops didn't implement ddim for x_theta model")
+
+            # Compute posterior mean
+            c1 = torch.sqrt(alpha_bar_t_prev)
+            c2 = torch.sqrt(1 - alpha_bar_t_prev)
+            x_t = c1 * x_0_hat + c2 * model_output
+
+        return x_t.detach()
+
 
 class LatentDiffusionWrapper(nn.Module):
     def __init__(
@@ -233,7 +317,15 @@ class LatentDiffusionWrapper(nn.Module):
         return self.diffusion.compute_loss(latent_trajectory, conditioning=(batch["local_conditioning"], batch["global_conditioning"]))
 
     @torch.no_grad()
-    def sample(self, batch_size: int, horizon: int, vae_downsample: int, device: str, local_conditioning: torch.Tensor, global_conditioning: torch.Tensor) -> torch.Tensor:
+    def sample(self,
+               batch_size: int,
+               horizon: int,
+               vae_downsample: int,
+               device: str,
+               local_conditioning: torch.Tensor,
+               global_conditioning: torch.Tensor,
+               sampler: SamplerType,
+               ) -> torch.Tensor:
         """
         1. Samples latents from pure noise using the reverse diffusion process.
         2. Decodes latents using the VAE decoder.
@@ -245,7 +337,7 @@ class LatentDiffusionWrapper(nn.Module):
             device: device for pytorch tensors
             local_conditioning: Set of waypoints given as [batch_size x 6  x 3] where the center is the initial state
             global_conditioning: Set of waypoints given as [batch_size x 4  x 4]
-
+            sampler: SamplerType
         Returns:
             x: Generated trajectories of shape [batch_size x horizon x traj_dim]
         """
@@ -262,9 +354,17 @@ class LatentDiffusionWrapper(nn.Module):
             self.null_token_global.expand((batch_size, global_conditioning.shape[1], -1))
         )
 
-        latent_trajectories = self.diffusion.sample(
-            batch_size, latent_horizon, device, conditioning=(conditioning, null_conditioning)
-        )
+        if sampler == SamplerType.DDPM:
+            latent_trajectories = self.diffusion.sample(
+                batch_size, latent_horizon, device, conditioning=(conditioning, null_conditioning)
+            )
+        elif sampler == SamplerType.DDIM:
+            latent_trajectories = self.diffusion.sample_ddim(
+                batch_size, horizon, device, 10, conditioning=(conditioning, null_conditioning)
+            )
+        else:
+            raise ValueError(f"Sampler {sampler} not implemented.")
+
         trajectories = self.decoder(latent_trajectories)
 
         return trajectories

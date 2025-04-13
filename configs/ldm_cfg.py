@@ -7,7 +7,7 @@ from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, Normalize
 from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset, DiffusionDataset
 
 unet_args = Unet1DArgs(
-    traj_dim=12,
+    traj_dim=6,
     features=128,
     channel_mults=[1, 2, 4],
     attentions=[
@@ -47,7 +47,7 @@ train_args = TrainerArgs(
     description="Training wi1h 174 VAE"
 )
 
-vae_experiment = 174
+vae_experiment = 191
 
 normalizer = NoNormalizer()
 

@@ -4,15 +4,16 @@ import tqdm
 import torch
 import matplotlib.pyplot as plt
 
-from .samplers import SamplerType, ScoringMethod
 from .scoring import (
+    ScoringMethod,
     filter_valid_trajectories,
     fastest,
-    slowest
+    slowest,
+    min_curvature
 )
 
 from quadrotor_diffusion.utils.nn.training import Trainer
-from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
+from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper, SamplerType
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
@@ -30,6 +31,7 @@ def cudnn_benchmark(
     model: LatentDiffusionWrapper,
     vae_downsample: int,
     device: str,
+    sampler: SamplerType,
 ):
     """
     If model input sizes are fixed some optimizations can be done to speed up inference. Run this method before using the planner as long as the number of samples stays consistent
@@ -47,8 +49,15 @@ def cudnn_benchmark(
     local_conditioning = torch.ones((samples, 6, 3), dtype=torch.float32, device=device)
     global_conditioning = torch.ones((samples, 4, 4), dtype=torch.float32, device=device)
     for _ in range(5):
-        _ = model.sample(samples, 128, vae_downsample, "cuda",
-                         local_conditioning=local_conditioning, global_conditioning=global_conditioning)
+        _ = model.sample(
+            samples,
+            128,
+            vae_downsample,
+            device,
+            local_conditioning=local_conditioning,
+            global_conditioning=global_conditioning,
+            sampler=sampler
+        )
 
     print("Finished cudnn benchmark")
 
@@ -112,11 +121,15 @@ def plan(
         device).unsqueeze(0).expand((samples, -1, -1))
 
     # Sample Candidates
-    if sampler == SamplerType.DDPM:
-        trajectories = model.sample(samples, 128, vae_downsample, device,
-                                    local_conditioning=local_conditioning, global_conditioning=global_conditioning)
-    else:
-        raise ValueError(f"Sampler {sampler} not implemented")
+    trajectories = model.sample(
+        samples,
+        128,
+        vae_downsample,
+        device,
+        local_conditioning=local_conditioning,
+        global_conditioning=global_conditioning,
+        sampler=sampler
+    )
 
     # Filter candidates to ones which have a valid starting state and cross the next gate
     trajectories = trajectories[filter_valid_trajectories(trajectories, x_0_expected, g_i)]
@@ -125,14 +138,16 @@ def plan(
         best_traj = fastest(trajectories)
     elif scoring == ScoringMethod.SLOW:
         best_traj = slowest(trajectories)
+    elif scoring == ScoringMethod.STRAIGHT:
+        best_traj = min_curvature(trajectories)
     else:
         raise ValueError(f"Scoring method {scoring} not implemented")
 
     trajectory = trajectories[best_traj]
     delta = trajectory[0] - x_0_expected
-    trajectory -= delta
 
     ending_idx = (trajectory - g_i).pow(2).sum(-1).argmin().item()
+    trajectory[:ending_idx] -= 0 * delta * torch.linspace(1, 0, ending_idx, device=device)[:, None].expand(-1, 3)
 
     trajectory = trajectory.cpu().numpy()
     if current_traj is None:

@@ -18,18 +18,18 @@ from quadrotor_diffusion.utils.quad_logging import iprint as print
 from quadrotor_diffusion.utils.plotting import plot_states,  plot_ref_obs_states, add_gates_to_course, add_trajectory_to_course, course_base_plot
 from quadrotor_diffusion.utils.simulator import play_trajectory, create_perspective_rendering
 from quadrotor_diffusion.utils.file import get_checkpoint_file, get_sample_folder, load_course_trajectory
-from quadrotor_diffusion.utils.nn.post_process import fit_to_recon
+from quadrotor_diffusion.planner import plan, cudnn_benchmark, SamplerType, ScoringMethod
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-e', '--experiment', type=int, help='Experiment number', required=True)
 
 parser.add_argument('-s', '--samples', type=int, help='Number of trajectories to generate', required=True)
 parser.add_argument('-c', '--course', type=str, help='Sample (course_type,course_number)', required=True)
+parser.add_argument('-l', '--laps', type=int, help='How many laps to do', required=True)
 
 parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is biggest', default=None)
 parser.add_argument('-d', '--device', type=str, help='Device to use', default="cuda")
 parser.add_argument('-m', '--no_ema', action='store_true', help="Use normal model instead of ema model.")
-parser.add_argument('-w', '--warm', action='store_true', help="Run cudnn benchmark for speedups.")
 
 args = parser.parse_args()
 sys.argv = [sys.argv[0]]
@@ -73,103 +73,101 @@ model = diff if args.no_ema else ema
 model.decoder = vae_wrapper.decode
 model.to(args.device)
 
+cudnn_benchmark(args.samples, model, vae_downsample, args.device)
 
-def score(trajectories: torch.Tensor, initial_position: np.array) -> int:
-    initial_position = torch.tensor(initial_position, dtype=torch.float32, device="cpu")
-    return torch.argmin(torch.norm(trajectories[:, 0, :] - initial_position, dim=-1)).item()
+current_traj = None
 
+gate_idx = 0
 
-def score(trajectories: torch.Tensor, initial_position: np.array) -> int:
-    """
-    Returns the index of a trajectory whose initial position is within 0.03 of the given initial_position and
-    which has the largest distance between its first and last points. Falls back to the trajectory with the minimal
-    initial distance if no trajectory meets the threshold.
-    """
-    initial_position = torch.tensor(initial_position, dtype=torch.float32, device="cpu")
-    dists0 = torch.norm(trajectories[:, 0, :] - initial_position, dim=-1)
-    filtered_idxs = torch.nonzero(dists0 < 0.05, as_tuple=True)[0]
-    if len(filtered_idxs) == 0:
-        return torch.argmin(dists0).item()
-    diff = torch.norm(trajectories[filtered_idxs, 0, :] - trajectories[filtered_idxs, -1, :], dim=-1)
-    return filtered_idxs[torch.argmax(diff)].item()
+computation_times = []
+trajectory_times = []
+trajectories = []
 
+gates_per_lap = course.shape[0] - 1
+iterations = gates_per_lap * args.laps + 1
 
-local_conditioning = torch.tensor(np.tile(course[0], (6, 1)), dtype=torch.float32).to(args.device)
-# Discard the yaw component for local conditioning
-local_conditioning = local_conditioning.unsqueeze(0).expand((args.samples, -1, -1))[:, :, :3]
+for i in range(iterations):
+    global_context = course
+    if current_traj is not None:
+        global_context = np.vstack((course[gate_idx + 1:], course[1:gate_idx]))
 
-global_conditioning = np.vstack((course[1:], course[1:0]))
-null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(global_conditioning), 1))
-global_conditioning = np.vstack((global_conditioning, null_tokens))
-global_conditioning = torch.tensor(global_conditioning, dtype=torch.float32).to(args.device)
+    s = time.time()
+    next_traj, candidates = plan(
+        args.samples,
+        global_context,
+        SamplerType.DDPM,
+        ScoringMethod.FAST,
+        model,
+        vae_downsample,
+        "cuda",
+        current_traj=current_traj
+    )
+    trajectories.append(next_traj)
 
-if args.warm:
-    print("Warming")
-    torch.backends.cudnn.benchmark = True
-    for i in range(25):
-        trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
-                                    local_conditioning=local_conditioning, global_conditioning=global_conditioning)
-    print("Finished warming")
+    computation_times.append(
+        time.time() - s
+    )
+    trajectory_times.append(
+        next_traj[0].shape[0] / 30
+    )
 
-start = time.time()
-trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
-                            local_conditioning=local_conditioning, global_conditioning=global_conditioning).cpu()
+    _, axs = course_base_plot()
+    add_gates_to_course(course, axs, has_end=False)
+    if current_traj:
+        add_trajectory_to_course(axs, current_traj[0])
+    for traj in candidates:
+        add_trajectory_to_course(axs, traj.cpu().numpy(), reference=True)
+    plt.savefig(
+        os.path.join(sample_dir, f"iteration_{i}_candidates.pdf")
+    )
+    plt.close()
 
-segments = []
+    _, axs = course_base_plot()
+    add_gates_to_course(course, axs, has_end=False)
+    add_trajectory_to_course(axs, next_traj[0])
+    plt.savefig(
+        os.path.join(sample_dir, f"iteration_{i}_taken_path.pdf")
+    )
+    plt.close()
 
-segment_0 = trajectories[score(trajectories, course[0][:3])].numpy()
-ending_idx = np.argmin(np.linalg.norm(segment_0 - course[1][:3], axis=1))
-segment_0 = segment_0[:ending_idx]
-segments.append(segment_0)
+    gate_idx += 1
+    current_traj = next_traj
 
-for i in range(len(course) - 1):
-    gate_idx = i + 1
-    local_conditioning = np.hstack((segments[-1][-6:], np.zeros((6, 1))))
-    local_conditioning = torch.tensor(local_conditioning, dtype=torch.float32).to(args.device)
-    local_conditioning = local_conditioning.unsqueeze(0).expand((args.samples, -1, -1))
+    # Looped back around to previous gate
+    if gate_idx == len(course):
+        gate_idx = 1
 
-    global_conditioning = np.vstack((course[1+gate_idx:], course[1:gate_idx]))
-    null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (6 - len(global_conditioning), 1))
-    global_conditioning = np.vstack((global_conditioning, null_tokens))
-    global_conditioning = torch.tensor(global_conditioning, dtype=torch.float32).to(args.device)
-
-    trajectories = model.sample(args.samples, 128, vae_downsample, args.device,
-                                local_conditioning=local_conditioning, global_conditioning=global_conditioning).cpu()
-
-    trajectory = trajectories[score(trajectories, segments[-1][-1])].numpy()
-    next_gate = gate_idx + 1 if gate_idx + 1 < len(course) else 1
-    ending_idx = np.argmin(np.linalg.norm(trajectory - course[next_gate][:3], axis=1))
-    trajectory = trajectory[:ending_idx]
-    segments.append(trajectory)
-
-segments.append(segments[1])
-trajectory = np.vstack(segments)
-pos, vel, acc = fit_to_recon(trajectory, 30)
-
-print(f"Finished sampling in {time.time() - start:.4f} seconds")
+reference = [np.vstack([t[idx] for t in trajectories]) for idx in range(3)]
+ref_pos = reference[0]
+ref_vel = reference[1]
+ref_acc = reference[2]
 
 plot_states(
-    pos, vel, acc,
-    f"Sample {i} / {trajectories.size(0)}",
+    ref_pos, ref_vel, ref_acc,
+    f"",
     os.path.join(sample_dir, f"sample.pdf")
 )
 
-_, ax = course_base_plot()
-add_gates_to_course(course, ax, has_end=False)
-add_trajectory_to_course(pos, velocity_profile=vel)
-plt.savefig(os.path.join(sample_dir, f"bev.pdf"))
-plt.close()
-
-worked, states = play_trajectory(pos, vel, acc)
+worked, states = play_trajectory(ref_pos, ref_vel, ref_acc)
 if not worked:
     print("Failed")
 
 plot_ref_obs_states(
-    pos, vel, acc,
+    ref_pos, ref_vel, ref_acc,
     states[0], states[1], states[1],
-    f"Sample {i} / {trajectories.size(0)}",
+    f"",
     os.path.join(sample_dir, f"sim.pdf")
 )
 
-create_perspective_rendering(states, np.vstack([course, course[-1]]), reference=pos,
+create_perspective_rendering(states, np.vstack([course, course[-1]]), reference=ref_pos,
                              filename=os.path.join(sample_dir, f"sample.mp4"))
+
+for idx, (t_t, c_t) in enumerate(zip(trajectory_times, computation_times[1:])):
+    print(f"Plan {idx}:")
+    print(f"\t{t_t:.2f} seconds on previous trajectory")
+    print(f"\t{c_t:.2f} seconds to compute next trajectory")
+    if c_t > t_t:
+        print("\tFailed computation before next segment")
+    else:
+        print("\tComputation succeeded")
+    print("=======================================")

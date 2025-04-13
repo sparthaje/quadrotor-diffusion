@@ -432,11 +432,11 @@ def get_render_map(ref_vel: np.ndarray, max_point_size: float, min_point_size: f
     vel_mag = np.linalg.norm(ref_vel, axis=1)
     point_sizes = (max_point_size - min_point_size) * (vel_mag / MAX_VEL) + min_point_size
 
-    timestamps = np.linspace(0, 1, ref_vel.shape[0])
+    timestamps = np.arange(ref_vel.shape[0])
     primary_colors = [matplotlib.rcParams['axes.prop_cycle'].by_key()['color'][0],
                       matplotlib.rcParams['axes.prop_cycle'].by_key()['color'][1]]
     colormap = LinearSegmentedColormap.from_list('custom_map', primary_colors)
-    norm = Normalize(vmin=0, vmax=1)
+    norm = Normalize(vmin=0, vmax=60)
 
     return point_sizes, colormap(norm(timestamps))
 
@@ -464,9 +464,10 @@ def add_trajectory_to_course(axs: list[plt.Axes], trajectory: Union[PolynomialTr
     point_sizes, colors = get_render_map(ref_vel, MAX_POINT_SIZE, MIN_POINT_SIZE)
 
     if reference:
-        axs[0].plot(ref_pos[:, 0], ref_pos[:, 1], c='red', linewidth=2)
+        ref_color = matplotlib.rcParams['axes.prop_cycle'].by_key()['color'][2]
+        axs[0].plot(ref_pos[:, 0], ref_pos[:, 1], c=ref_color, linewidth=2)
         if len(axs) > 1:
-            axs[1].plot(ref_pos[:, 0], ref_pos[:, 2], c='red', linewidth=0.5)
+            axs[1].plot(ref_pos[:, 0], ref_pos[:, 2], c=ref_color, linewidth=0.5)
     else:
         axs[0].scatter(ref_pos[:, 0], ref_pos[:, 1], s=point_sizes, c=colors, marker='o', alpha=0.8)
         if len(axs) > 1:
