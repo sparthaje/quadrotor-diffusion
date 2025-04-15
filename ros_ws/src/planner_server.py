@@ -1,4 +1,4 @@
-import socket
+import time
 import pickle
 
 import numpy as np
@@ -79,6 +79,7 @@ cudnn_benchmark(args.samples, model, vae_downsample, args.device, sampler=sample
 
 @app.route('/plan', methods=['POST'])
 def plan_route():
+    start = time.time()
     data = request.data
     current_traj, global_context = pickle.loads(data)
     next_traj, _ = plan(
@@ -91,6 +92,7 @@ def plan_route():
         args.device,
         current_traj=current_traj,
     )
+    print(f"Computation time {time.time() - start:.2f}")
     return pickle.dumps(next_traj)
 
 

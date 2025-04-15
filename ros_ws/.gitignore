@@ -10,3 +10,4 @@ log/
 .idea/
 ros_ws.iml
 *.launch~
+.catkin_workspace
