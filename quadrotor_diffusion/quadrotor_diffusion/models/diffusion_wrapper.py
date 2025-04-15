@@ -362,7 +362,7 @@ class LatentDiffusionWrapper(nn.Module):
             )
         elif sampler == SamplerType.DDIM:
             latent_trajectories = self.diffusion.sample_ddim(
-                batch_size, latent_horizon, device, 50, conditioning=(conditioning, null_conditioning)
+                batch_size, latent_horizon, device, 10, conditioning=(conditioning, null_conditioning)
             )
         else:
             raise ValueError(f"Sampler {sampler} not implemented.")

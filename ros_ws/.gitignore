@@ -1,0 +1,12 @@
+build/
+devel/
+install/
+log/
+*.pyc
+*.swp
+*.swo
+.env
+.vscode/
+.idea/
+ros_ws.iml
+*.launch~
