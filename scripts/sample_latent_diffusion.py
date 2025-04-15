@@ -10,7 +10,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from quadrotor_diffusion.utils.nn.training import Trainer
-from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
+from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper, SamplerType
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
@@ -18,7 +18,7 @@ from quadrotor_diffusion.utils.quad_logging import iprint as print
 from quadrotor_diffusion.utils.plotting import plot_states,  plot_ref_obs_states, add_gates_to_course, add_trajectory_to_course, course_base_plot
 from quadrotor_diffusion.utils.simulator import play_trajectory, create_perspective_rendering
 from quadrotor_diffusion.utils.file import get_checkpoint_file, get_sample_folder, load_course_trajectory
-from quadrotor_diffusion.planner import plan, cudnn_benchmark, SamplerType, ScoringMethod
+from quadrotor_diffusion.planner import plan, cudnn_benchmark, ScoringMethod
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-e', '--experiment', type=int, help='Experiment number', required=True)
@@ -73,7 +73,7 @@ model = diff if args.no_ema else ema
 model.decoder = vae_wrapper.decode
 model.to(args.device)
 
-cudnn_benchmark(args.samples, model, vae_downsample, args.device)
+cudnn_benchmark(args.samples, model, vae_downsample, args.device, sampler=SamplerType.DDPM)
 
 current_traj = None
 
@@ -154,7 +154,7 @@ if not worked:
 
 plot_ref_obs_states(
     ref_pos, ref_vel, ref_acc,
-    states[0], states[1], states[1],
+    states[0], states[1], ref_acc,
     f"",
     os.path.join(sample_dir, f"sim.pdf")
 )
@@ -171,3 +171,5 @@ for idx, (t_t, c_t) in enumerate(zip(trajectory_times, computation_times[1:])):
     else:
         print("\tComputation succeeded")
     print("=======================================")
+
+print(os.path.join(sample_dir, f"sim.pdf"))

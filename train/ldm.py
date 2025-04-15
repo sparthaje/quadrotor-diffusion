@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
+from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper, SamplerType
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
@@ -83,6 +83,7 @@ while trainer.epoch < N_epochs:
         device=train_args.device,
         local_conditioning=local_conditioning,
         global_conditioning=global_conditioning,
+        sampler=SamplerType.DDPM,
     )
 
     # Cut the local conditioning to only be the prior states

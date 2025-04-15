@@ -71,6 +71,7 @@ def plan(
     vae_downsample: int,
     device: str,
     current_traj: list[np.array] = None,
+    return_all_samples: bool = False
 ) -> tuple[
     list[np.ndarray],
     torch.Tensor,
@@ -88,7 +89,7 @@ def plan(
         vae_downsample (int): Compression rate of autoencoder
         device (str): Where to run sampling code
         current_traj (list[np.array], optional): Current trajectory tracking. If none will plan from c[0].
-
+        return_all_samples: Instead of second argument being all considered samples it will return all generated samples
     Returns:
         tuple[ list[np.ndarray], torch.Tensor, ]: 
             - Next trajectory to follow
@@ -132,28 +133,30 @@ def plan(
     )
 
     # Filter candidates to ones which have a valid starting state and cross the next gate
-    trajectories = trajectories[filter_valid_trajectories(trajectories, x_0_expected, g_i)]
+    candidates = trajectories[filter_valid_trajectories(trajectories, x_0_expected, g_i)]
 
     if scoring == ScoringMethod.FAST:
-        best_traj = fastest(trajectories)
+        best_traj = fastest(candidates)
     elif scoring == ScoringMethod.SLOW:
-        best_traj = slowest(trajectories)
+        best_traj = slowest(candidates)
     elif scoring == ScoringMethod.STRAIGHT:
-        best_traj = min_curvature(trajectories)
+        best_traj = min_curvature(candidates)
     else:
         raise ValueError(f"Scoring method {scoring} not implemented")
 
-    trajectory = trajectories[best_traj]
+    trajectory = candidates[best_traj]
     delta = trajectory[0] - x_0_expected
 
     ending_idx = (trajectory - g_i).pow(2).sum(-1).argmin().item()
     trajectory[:ending_idx] -= 0 * delta * torch.linspace(1, 0, ending_idx, device=device)[:, None].expand(-1, 3)
 
+    trajectories_to_return = trajectories if return_all_samples else candidates
+
     trajectory = trajectory.cpu().numpy()
     if current_traj is None:
         smooth_trajectory = fit_to_recon(trajectory, 30)
         smooth_trajectory = [x[:ending_idx] for x in smooth_trajectory]
-        return smooth_trajectory, trajectories
+        return smooth_trajectory, trajectories_to_return
 
     # Fit next trajectory considering current trajectory
     smooth_trajectory = np.vstack((current_traj[0], trajectory))
@@ -161,4 +164,4 @@ def plan(
     points_current_traj = current_traj[0].shape[0]
     smooth_trajectory = [x[points_current_traj:points_current_traj+ending_idx] for x in smooth_trajectory]
 
-    return smooth_trajectory, trajectories
+    return smooth_trajectory, trajectories_to_return

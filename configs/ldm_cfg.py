@@ -7,7 +7,7 @@ from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, Normalize
 from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset, DiffusionDataset
 
 unet_args = Unet1DArgs(
-    traj_dim=6,
+    traj_dim=12,
     features=128,
     channel_mults=[1, 2, 4],
     attentions=[
@@ -41,13 +41,13 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:2",
+    device="cuda:3",
     max_epochs=400,
     evaluate_every=5,
-    description="Training wi1h 174 VAE"
+    description="Training wi1h 192 VAE, joint masking on local at all+weighted l1 loss"
 )
 
-vae_experiment = 191
+vae_experiment = 192
 
 normalizer = NoNormalizer()
 

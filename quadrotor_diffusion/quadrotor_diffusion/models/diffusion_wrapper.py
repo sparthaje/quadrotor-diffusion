@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from quadrotor_diffusion.utils.nn.schedulers import cosine_beta_schedule
-from quadrotor_diffusion.models.losses import MSELoss, L1Loss
+from quadrotor_diffusion.models.losses import MSELoss, L1Loss, WeightedL1Loss
 from quadrotor_diffusion.models.temporal import Unet1D
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.args import (
@@ -78,6 +78,8 @@ class DiffusionWrapper(nn.Module):
             self.loss = MSELoss()
         elif loss == "L1Loss":
             self.loss = L1Loss()
+        elif loss == "WeightedL1Loss":
+            self.loss = WeightedL1Loss(self.args[0].loss_params)
         else:
             raise NotImplementedError(f"{loss} loss module is not supported")
 
@@ -305,10 +307,10 @@ class LatentDiffusionWrapper(nn.Module):
         batch["global_conditioning"][mask] = self.null_token_global.expand((
             -1, batch["global_conditioning"].shape[1], -1
         ))
-        mask = torch.rand(batch_size, device=latent_trajectory.device) < self.args[0].dropout
-        batch["local_conditioning"][mask] = self.null_token_local.expand((
-            -1, batch["local_conditioning"].shape[1], -1
-        ))
+        # mask = torch.rand(batch_size, device=latent_trajectory.device) < self.args[0].dropout
+        # batch["local_conditioning"][mask] = self.null_token_local.expand((
+        #     -1, batch["local_conditioning"].shape[1], -1
+        # ))
 
         horizon_downsample_factor = 2 ** (len(self.args[1].channel_mults)-1)
         horizon_modulo = latent_trajectory.shape[-2] % horizon_downsample_factor
@@ -360,7 +362,7 @@ class LatentDiffusionWrapper(nn.Module):
             )
         elif sampler == SamplerType.DDIM:
             latent_trajectories = self.diffusion.sample_ddim(
-                batch_size, horizon, device, 10, conditioning=(conditioning, null_conditioning)
+                batch_size, latent_horizon, device, 50, conditioning=(conditioning, null_conditioning)
             )
         else:
             raise ValueError(f"Sampler {sampler} not implemented.")
