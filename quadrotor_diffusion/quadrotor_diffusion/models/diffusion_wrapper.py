@@ -254,6 +254,90 @@ class DiffusionWrapper(nn.Module):
 
         return x_t.detach()
 
+    def consistency_step(
+        self,
+        x_n: torch.Tensor,
+        c_local: torch.Tensor,
+        c_global: torch.Tensor,
+        t_n: torch.Tensor,
+        w: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        LCM to produce z_0
+
+        Args:
+            z_n (torch.Tensor): Noised latent: [B, horizon, horizon]
+            c_local (torch.Tensor): x_{-p:0} -> [B, p, 3]
+            c_global (torch.Tensor): c -> [B, 4, 4]
+            t_n (torch.Tensor): [B]
+            w (torch.Tensor): [B]
+
+        Returns:
+            torch.Tensor: [B, horizon, horizon]
+        """
+        # this is a hack should fix at some point
+        if not hasattr(self, "null_token_global"):
+            self.null_token_global = 5 * torch.ones(self.args[1].conditioning[1], device=x_n.device).reshape((1, 1, -1))
+
+        alpha_t = self.alpha_bar[t_n].unsqueeze(-1).unsqueeze(-1)
+
+        x_n_tiled = x_n.repeat(2, 1, 1)
+        time_n_tiled = t_n.repeat(2)
+        conditioning_0 = c_local.repeat(2, 1, 1)
+        conditioning_1 = torch.cat((
+            c_global,
+            self.null_token_global.expand((
+                c_global.shape[0], c_global.shape[1], -1
+            ))
+        ))
+        model_output = self.model(x_n_tiled, time_n_tiled, (conditioning_0, conditioning_1))
+        eps_c = model_output[:model_output.shape[0]//2, :, :]
+        eps_null = model_output[model_output.shape[0]//2:, :, :]
+        epsilon = (1 + w) * eps_c - w * eps_null
+
+        # This isn't really a real value for my data but this function is just here to serve as a boundary condition
+        sigma_data = 0.5
+        # Scaling that affects smoothness of boundary condition larger = sharper
+        s = 10.0
+        c_skip = (sigma_data ** 2) / (torch.pow(s * t_n, 2) + sigma_data ** 2)
+        c_out = (s * t_n) / torch.sqrt(torch.pow(s * t_n, 2) + sigma_data ** 2)
+
+        x_0_hat = (x_n - torch.sqrt(1 - alpha_t) * epsilon) / torch.sqrt(alpha_t)
+
+        # This boundary condition enforces that at t=0 we get the initial latent back in a smooth differential way
+        return c_skip.unsqueeze(-1).unsqueeze(-1) * x_n + c_out.unsqueeze(-1).unsqueeze(-1) * x_0_hat
+
+    def sample_consistency(self,
+                           batch_size: int,
+                           horizon: int,
+                           device: str,
+                           S: int,
+                           c_local: torch.Tensor,
+                           c_global: torch.Tensor,
+                           ) -> torch.Tensor:
+        # Start from pure noise
+        x_t = torch.randn((batch_size, horizon, self.unet_args.traj_dim), device=device)
+
+        # https://arxiv.org/pdf/2305.08891
+
+        # Leading, since n=T is the first step
+        timesteps = np.arange(0, self.n_timesteps - 1, int(self.n_timesteps / (S - 1)))
+        timesteps = np.append(np.array([-1]), timesteps)
+
+        w = 0.0
+        t_n = torch.ones(batch_size, device=device).long() * (self.n_timesteps - 1)
+        x_0 = self.consistency_step(x_t, c_local, c_global, t_n, w)
+        for t in reversed(timesteps):
+            t_n = torch.ones(batch_size, device=device).long() * t
+
+            alpha_t = self.alpha_bar[t].unsqueeze(-1).unsqueeze(-1)
+            epsilon = torch.randn_like(x_t)
+            x_t = torch.sqrt(alpha_t) * x_0 + torch.sqrt(1 - alpha_t) * epsilon
+
+            x_0 = self.consistency_step(x_t, c_local, c_global, t_n, w)
+
+        return x_0.detach()
+
 
 class LatentDiffusionWrapper(nn.Module):
     def __init__(
@@ -265,7 +349,7 @@ class LatentDiffusionWrapper(nn.Module):
     ):
         super().__init__()
 
-        self.args = args
+        self.args = list(args)
         self.diffusion = DiffusionWrapper((
             DiffusionWrapperArgs(
                 predict_epsilon=args[0].predict_epsilon,
@@ -363,6 +447,10 @@ class LatentDiffusionWrapper(nn.Module):
         elif sampler == SamplerType.DDIM:
             latent_trajectories = self.diffusion.sample_ddim(
                 batch_size, latent_horizon, device, 4, conditioning=(conditioning, null_conditioning)
+            )
+        elif sampler == SamplerType.CONSISTENCY:
+            latent_trajectories = self.diffusion.sample_consistency(
+                batch_size, latent_horizon, device, 4, local_conditioning, global_conditioning
             )
         else:
             raise ValueError(f"Sampler {sampler} not implemented.")

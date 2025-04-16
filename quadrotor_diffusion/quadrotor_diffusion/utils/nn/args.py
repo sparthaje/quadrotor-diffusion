@@ -53,6 +53,18 @@ class LatentDiffusionWrapperArgs:
 
 
 @dataclass
+class LatentConsistencyArgs:
+    """
+    k: Skipping steps (i.e. training to match t_n and t_{n+k})
+    w_min: Min weight for CFG
+    w_max: Max weight for CFG
+    """
+    k: int
+    w_min: float
+    w_max: float
+
+
+@dataclass
 class VAE_EncoderArgs:
     """
     traj_dim: number of items per state (i.e. xyz = 3)

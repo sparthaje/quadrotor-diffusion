@@ -16,7 +16,7 @@ import tqdm
 import wandb
 
 import quadrotor_diffusion.utils.nn.ema as ema
-from quadrotor_diffusion.utils.nn.args import TrainerArgs
+from quadrotor_diffusion.utils.nn.args import TrainerArgs, LatentConsistencyArgs
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.file import get_checkpoint_file
@@ -26,6 +26,8 @@ from quadrotor_diffusion.utils.quad_logging import (
     dataclass_to_table,
     iprint as print
 )
+from quadrotor_diffusion.models.distillation import LcmDistillationTrainer
+from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper
 
 # TODO(shreepa): Probably should fix this at some point
 # Suppress FutureWarning for this specific issue
@@ -46,6 +48,7 @@ config_module = importlib.import_module(f'configs.{cfg_name}')
 unet_args: Unet1DArgs = config_module.unet_args
 diff_args: LatentDiffusionWrapperArgs = config_module.diff_args
 train_args: TrainerArgs = config_module.train_args
+lcm_args: LatentConsistencyArgs = config_module.lcm_args
 dataset: torch.utils.data.Dataset = config_module.dataset
 
 # Load pre-trained embeddings
@@ -57,6 +60,19 @@ vae_wrapper.to(train_args.device)
 
 ldm_experiment: int = config_module.ldm_experiment
 chkpt = get_checkpoint_file("logs/training", ldm_experiment)
-vae_wrapper: VAE_Wrapper = None
+ldm_wrapper: LatentDiffusionWrapper = None
 _, ldm_wrapper, _, _ = Trainer.load(chkpt, get_ema=True)
 ldm_wrapper.to(train_args.device)
+
+ldm_wrapper.encoder = vae_wrapper.encode
+ldm_wrapper.decoder = vae_wrapper.decode
+
+trainer = LcmDistillationTrainer(
+    train_args,
+    lcm_args,
+    ldm_wrapper,
+    dataset,
+)
+
+trainer.test_forward_pass()
+trainer.train()

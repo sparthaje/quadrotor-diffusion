@@ -1,8 +1,8 @@
-# ldm_cfg
+# lcm_cfg
 
 import numpy as np
 
-from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
+from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs, LatentConsistencyArgs
 from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, NormalizerTuple
 from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset, DiffusionDataset
 
@@ -29,9 +29,9 @@ diff_args = LatentDiffusionWrapperArgs(
 )
 
 train_args = TrainerArgs(
-    ema_decay=0.995,
-    num_batches_no_ema=20,
-    num_batches_per_ema=10,
+    ema_decay=0.999,
+    num_batches_no_ema=0,
+    num_batches_per_ema=1,
 
     batch_size_per_gpu=128,
     batches_per_backward=4,
@@ -41,13 +41,20 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:3",
+    device="cuda:1",
     max_epochs=400,
-    evaluate_every=5,
-    description="Training wi1h 192 VAE, joint masking on local at all+weighted l1 loss"
+    evaluate_every=None,
+    description=""
+)
+
+lcm_args = LatentConsistencyArgs(
+    k=2,
+    w_min=0.,
+    w_max=0.,
 )
 
 vae_experiment = 192
+ldm_experiment = 198
 
 normalizer = NoNormalizer()
 
