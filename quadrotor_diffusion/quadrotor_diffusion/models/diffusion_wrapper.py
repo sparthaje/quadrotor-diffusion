@@ -206,13 +206,13 @@ class DiffusionWrapper(nn.Module):
 
         # https://arxiv.org/pdf/2305.08891
 
-        # Leading (from stable diffusion)
+        # Leading (from stable diffusion) <Performs best on this dataset>
         timesteps = np.arange(0, self.n_timesteps - 1, int(self.n_timesteps / S))
         timesteps = np.append(np.array([-1]), timesteps)
 
         # Linspace iDDPM
-        timesteps = np.round(np.linspace(0, self.n_timesteps - 1, S)).astype(int)
-        timesteps = np.append(np.array([-1]), timesteps)
+        # timesteps = np.round(np.linspace(0, self.n_timesteps - 1, S)).astype(int)
+        # timesteps = np.append(np.array([-1]), timesteps)
 
         # Trailing DPM
         # timesteps = np.round(np.flip(np.arange(self.n_timesteps - 1, -1, -self.n_timesteps / S))).astype(int)
@@ -234,7 +234,7 @@ class DiffusionWrapper(nn.Module):
                 eps_c = eps[:eps.shape[0]//2, :, :]
                 eps_null = eps[eps.shape[0]//2:, :, :]
 
-                w = 0.5
+                w = 0
                 model_output = (1 + w) * eps_c - w * eps_null
             else:
                 model_output = self.model(x_t, time_t, None)
@@ -362,7 +362,7 @@ class LatentDiffusionWrapper(nn.Module):
             )
         elif sampler == SamplerType.DDIM:
             latent_trajectories = self.diffusion.sample_ddim(
-                batch_size, latent_horizon, device, 10, conditioning=(conditioning, null_conditioning)
+                batch_size, latent_horizon, device, 4, conditioning=(conditioning, null_conditioning)
             )
         else:
             raise ValueError(f"Sampler {sampler} not implemented.")
