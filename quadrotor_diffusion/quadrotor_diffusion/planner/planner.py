@@ -12,26 +12,18 @@ from .scoring import (
     min_curvature
 )
 
-from quadrotor_diffusion.utils.nn.training import Trainer
-from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper, SamplerType
-from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
-from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
-from quadrotor_diffusion.utils.nn.args import TrainerArgs
+from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper, SamplerType
 from quadrotor_diffusion.utils.quad_logging import iprint as print
-from quadrotor_diffusion.utils.plotting import plot_states,  plot_ref_obs_states, add_gates_to_course, add_trajectory_to_course, course_base_plot
-from quadrotor_diffusion.utils.simulator import play_trajectory, create_perspective_rendering
-from quadrotor_diffusion.utils.file import get_checkpoint_file, get_sample_folder, load_course_trajectory
 from quadrotor_diffusion.utils.nn.post_process import fit_to_recon
-from quadrotor_diffusion.utils.plotting import plot_states
-from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
 
 def cudnn_benchmark(
     samples: int,
-    model: LatentDiffusionWrapper,
+    model: DiffusionWrapper,
     vae_downsample: int,
     device: str,
-    sampler: SamplerType,
+    sampler: tuple[SamplerType, int],
+    w: float,
 ):
     """
     If model input sizes are fixed some optimizations can be done to speed up inference. Run this method before using the planner as long as the number of samples stays consistent
@@ -52,11 +44,12 @@ def cudnn_benchmark(
         _ = model.sample(
             samples,
             128,
-            vae_downsample,
             device,
             local_conditioning=local_conditioning,
             global_conditioning=global_conditioning,
-            sampler=sampler
+            sampler=sampler,
+            decoder_downsample=vae_downsample,
+            w=w,
         )
 
     print("Finished cudnn benchmark")
@@ -65,13 +58,15 @@ def cudnn_benchmark(
 def plan(
     samples: int,
     course: torch.Tensor,
-    sampler: SamplerType,
+    sampler: tuple[SamplerType, int],
+    w: float,
     scoring: ScoringMethod,
-    model: LatentDiffusionWrapper,
+    model: DiffusionWrapper,
     vae_downsample: int,
     device: str,
     current_traj: list[np.array] = None,
-    return_all_samples: bool = False
+    return_all_samples: bool = False,
+    ignore_filter_step: bool = False,
 ) -> tuple[
     list[np.ndarray],
     torch.Tensor,
@@ -84,12 +79,14 @@ def plan(
         course (torch.Tensor): 
             If starting from initial position, just give course as ordered gates with course[0] being initial position else
             Course such that it is ordered so the zeroth element is the next gate from the current state, don't include the most recent gate
-        sampler (SamplerType): Sampler algorithm
+        sampler (SamplerType): Sampler algorithm, number steps
+        w: CFG weighting
         model (LatentDiffusionWrapper): model
         vae_downsample (int): Compression rate of autoencoder
         device (str): Where to run sampling code
         current_traj (list[np.array], optional): Current trajectory tracking. If none will plan from c[0].
         return_all_samples: Instead of second argument being all considered samples it will return all generated samples
+        ignore_filter_step: Never set this to true unless debugging
     Returns:
         tuple[ list[np.ndarray], torch.Tensor, ]: 
             - Next trajectory to follow
@@ -125,15 +122,19 @@ def plan(
     trajectories = model.sample(
         samples,
         128,
-        vae_downsample,
-        device,
+        device=device,
         local_conditioning=local_conditioning,
         global_conditioning=global_conditioning,
-        sampler=sampler
+        sampler=sampler,
+        decoder_downsample=vae_downsample,
+        w=w,
     )
 
-    # Filter candidates to ones which have a valid starting state and cross the next gate
-    candidates = trajectories[filter_valid_trajectories(trajectories, x_0_expected, g_i)]
+    if not ignore_filter_step:
+        # Filter candidates to ones which have a valid starting state and cross the next gate
+        candidates = trajectories[filter_valid_trajectories(trajectories, x_0_expected, g_i)]
+    else:
+        candidates = trajectories
 
     if scoring == ScoringMethod.FAST:
         best_traj = fastest(candidates)
@@ -148,7 +149,7 @@ def plan(
     delta = trajectory[0] - x_0_expected
 
     ending_idx = (trajectory - g_i).pow(2).sum(-1).argmin().item()
-    trajectory[:ending_idx] -= 0 * delta * torch.linspace(1, 0, ending_idx, device=device)[:, None].expand(-1, 3)
+    trajectory[:ending_idx] -= delta * torch.linspace(1, 0, ending_idx, device=device)[:, None].expand(-1, 3)
 
     trajectories_to_return = trajectories if return_all_samples else candidates
 

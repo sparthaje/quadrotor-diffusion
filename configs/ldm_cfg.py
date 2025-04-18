@@ -2,12 +2,12 @@
 
 import numpy as np
 
-from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
+from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, NormalizerTuple
 from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset, DiffusionDataset
 
 unet_args = Unet1DArgs(
-    traj_dim=12,
+    traj_dim=4,
     features=128,
     channel_mults=[1, 2, 4],
     attentions=[
@@ -19,13 +19,12 @@ unet_args = Unet1DArgs(
     conditioning=(3, 4)  # not number of tokens but dimension of each token (local, global)
 )
 
-diff_args = LatentDiffusionWrapperArgs(
-    predict_epsilon=True,
+diff_args = DiffusionWrapperArgs(
+    predict="v",
     loss="L1Loss",
     n_timesteps=100,
     loss_params=None,
     dropout=0.2,
-    conditioning_shape=(3, 4)
 )
 
 train_args = TrainerArgs(
@@ -41,10 +40,10 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:3",
+    device="cuda:1",
     max_epochs=400,
     evaluate_every=5,
-    description="Training wi1h 192 VAE, joint masking on local at all+weighted l1 loss"
+    description=""
 )
 
 vae_experiment = 192

@@ -1,4 +1,4 @@
-# diffusion_cfg
+# ctm_cfg
 
 import numpy as np
 
@@ -7,7 +7,7 @@ from quadrotor_diffusion.utils.dataset.normalizer import NoNormalizer, Normalize
 from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceTrajectoryDataset, DiffusionDataset
 
 unet_args = Unet1DArgs(
-    traj_dim=3,
+    traj_dim=4,
     features=128,
     channel_mults=[1, 2, 4],
     attentions=[
@@ -15,22 +15,22 @@ unet_args = Unet1DArgs(
         [True],
         [False, False]
     ],
-    context_mlp="time",
+    context_mlp="time=t,s",
     conditioning=(3, 4)  # not number of tokens but dimension of each token (local, global)
 )
 
 diff_args = DiffusionWrapperArgs(
-    predict="epsilon",
     loss="L1Loss",
-    n_timesteps=100,
+    n_timesteps=None,  # continuous
     loss_params=None,
+    predict="g",
     dropout=0.2,
 )
 
 train_args = TrainerArgs(
-    ema_decay=0.995,
-    num_batches_no_ema=20,
-    num_batches_per_ema=10,
+    ema_decay=0.999,
+    num_batches_no_ema=0,
+    num_batches_per_ema=1,
 
     batch_size_per_gpu=128,
     batches_per_backward=4,
@@ -43,8 +43,10 @@ train_args = TrainerArgs(
     device="cuda:3",
     max_epochs=400,
     evaluate_every=5,
-    description=""
+    description="Training wi1h 192 VAE, joint masking on local at all+weighted l1 loss"
 )
+
+vae_experiment = 192
 
 normalizer = NoNormalizer()
 

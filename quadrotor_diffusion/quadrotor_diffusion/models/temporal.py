@@ -101,6 +101,22 @@ class Unet1D(nn.Module):
                 nn.Linear(features, features),
                 Reduce("b n c -> b c", reduction="mean")
             )
+
+        elif args.context_mlp == "time=t,s":
+            self.time_mlps = nn.ModuleList([
+                nn.Sequential(
+                    SinusoidalPosEmb(features),
+                    nn.Linear(features, 4 * features),
+                    nn.Mish(),
+                    nn.Linear(4 * features, features)
+                ) for _ in range(2)
+            ])
+
+            def time_mlp_method(t: torch.Tensor) -> torch.Tensor:
+                return self.time_mlps[0](t[:, 0]) + self.time_mlps[1](t[:, 1])
+
+            self.time_mlp = lambda t: time_mlp_method(t)
+
         else:
             raise ValueError("Unknown context")
 

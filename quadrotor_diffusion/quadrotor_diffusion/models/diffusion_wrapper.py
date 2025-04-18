@@ -28,6 +28,7 @@ class SamplerType(enum.Enum):
     DDPM = "ddpm"
     DDIM = "ddim"
     CONSISTENCY = "consistency"
+    GAMMA_CTM = "gamma_ctm"
 
 
 class DiffusionWrapper(nn.Module):
@@ -36,7 +37,7 @@ class DiffusionWrapper(nn.Module):
         args: Tuple[DiffusionWrapperArgs, Unet1DArgs],
     ):
         """
-        Wrapper that noises sample and computes the loss for a denoising diffusion model
+        Wrapper that noises sample and computes the loss for a denoising diffusion model (discrete diffusion steps)
         """
         super().__init__()
 
@@ -49,7 +50,6 @@ class DiffusionWrapper(nn.Module):
         self.diffusion_args = diffusion_args
         self.unet_args = unet_args
 
-        predict_epsilon = diffusion_args.predict_epsilon
         n_timesteps = diffusion_args.n_timesteps
         loss = diffusion_args.loss
 
@@ -57,10 +57,11 @@ class DiffusionWrapper(nn.Module):
         self.model = Unet1D(unet_args)
 
         self.n_timesteps = n_timesteps
-        self.predict_epsilon = predict_epsilon
 
         # Compute Scheduler Conflicts, betas is an array of dimension 1
-        betas = cosine_beta_schedule(n_timesteps)
+        clip = not diffusion_args.predict == "v"
+        betas = cosine_beta_schedule(n_timesteps, clip=clip)
+
         alpha = 1. - betas
         alpha_bar = torch.cumprod(alpha, axis=0)
 
@@ -74,6 +75,15 @@ class DiffusionWrapper(nn.Module):
 
         self.register_buffer('posterior_variance', posterior_variance)
 
+        self.null_token_local: torch.Tensor
+        self.register_buffer("null_token_local", 5 * torch.ones(args[1].conditioning[0]).reshape((1, 1, -1)))
+
+        self.null_token_global: torch.Tensor
+        self.register_buffer("null_token_global", 5 * torch.ones(args[1].conditioning[1]).reshape((1, 1, -1)))
+
+        self.encoder: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] = None
+        self.decoder: Callable[[torch.Tensor], torch.Tensor] = None
+
         if loss == "MSELoss":
             self.loss = MSELoss()
         elif loss == "L1Loss":
@@ -83,19 +93,33 @@ class DiffusionWrapper(nn.Module):
         else:
             raise NotImplementedError(f"{loss} loss module is not supported")
 
-    def compute_loss(self, x_0, **kwargs) -> torch.Tensor:
+    def compute_loss(self, batch: dict[str, torch.Tensor], **kwargs) -> torch.Tensor:
         """
-        Does a forward pass and computes the loss
+        Compute loss for the given trajectory
+        Args:
+            batch:
+                - x_0 (torch.Tensor): [B, Horizon, 3]
+                - global_conditioning (torch.Tensor): [B, 4, 4]
+                - local_conditioning (torch.Tensor): [B, 6, 3]
+            kwargs (dict): Capture any additional arguments
 
-        Parameters:
-        - x_0: clean trajectories [batch_size x horizon x states]
-        - kwargs: Capture any other arguments that may not be used
-
-        Return:
-        - loss: Result from loss function
+        Returns:
+            torch.Tensor: Loss value
         """
 
-        batch_size = len(x_0)
+        x_0 = batch["x_0"]
+        if self.encoder:
+            x_0, _ = self.encoder(x_0)
+
+        batch_size = x_0.shape[0]
+        mask = torch.rand(batch_size, device=x_0.device) < self.args[0].dropout
+        batch["global_conditioning"][mask] = self.null_token_global.expand((
+            -1, batch["global_conditioning"].shape[1], -1
+        ))
+
+        horizon_downsample_factor = 2 ** (len(self.args[1].channel_mults)-1)
+        horizon_modulo = x_0.shape[-2] % horizon_downsample_factor
+        assert horizon_modulo == 0, f"Invalid input data not divisible has module: {horizon_modulo}"
 
         # Sample noisy trajectories
         with torch.no_grad():
@@ -107,16 +131,55 @@ class DiffusionWrapper(nn.Module):
             alpha_t = self.alpha_bar[t].unsqueeze(-1).unsqueeze(-1)
             x_t = torch.sqrt(alpha_t) * x_0 + torch.sqrt(1 - alpha_t) * epsilon
 
-        c = None if "conditioning" not in kwargs else kwargs["conditioning"]
-        model_output = self.model(x_t, t, c)
+        model_output = self.model(x_t, t, (batch["local_conditioning"], batch["global_conditioning"]))
 
-        target = epsilon if self.predict_epsilon else x_0
-        loss = self.loss(model_output, target)
+        target = None
+        if self.args[0].predict == "epsilon":
+            target = epsilon
+        elif self.args[0].predict == "x":
+            target = x_0
+        elif self.args[0].predict == "v":
+            target = torch.sqrt(alpha_t) * epsilon - torch.sqrt(1 - alpha_t) * x_0
 
-        return loss
+        return self.loss(model_output, target)
+
+    def model_out_cfg(self, x_t: torch.Tensor, time_t: torch.Tensor, local_conditioning: torch.Tensor, global_conditioning: torch.Tensor, w: float):
+        """
+        eps = (1 + w) eps_conditioned - w * eps_null
+
+        Args:
+            x_t (torch.Tensor): _description_
+            time_t (torch.Tensor): _description_
+            local_conditioning (torch.Tensor): _description_
+            global_conditioning (torch.Tensor): _description_
+        """
+        # w = 0 means no CFG so just return model output
+        if w < 1e-2:
+            return self.model(x_t, time_t, (local_conditioning, global_conditioning))
+
+        x_t_tiled = x_t.repeat(2, 1, 1)
+        time_t_tiled = time_t.repeat(2)
+
+        c_local = local_conditioning.repeat(2, 1, 1)
+        c_global = torch.cat((
+            global_conditioning,
+            self.null_token_global.expand((global_conditioning.shape[0], global_conditioning.shape[1], -1))
+        ))
+
+        eps = self.model(x_t_tiled, time_t_tiled, (c_local, c_global))
+        eps_c = eps[:eps.shape[0]//2, :, :]
+        eps_null = eps[eps.shape[0]//2:, :, :]
+
+        return (1 + w) * eps_c - w * eps_null
 
     @torch.no_grad()
-    def sample(self, batch_size: int, horizon: int, device: str, conditioning: tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] = None) -> torch.Tensor:
+    def sample_ddpm(self,
+                    batch_size: int,
+                    horizon: int,
+                    device: str,
+                    local_conditioning: torch.Tensor,
+                    global_conditioning: torch.Tensor,
+                    w: float) -> torch.Tensor:
         """
         Samples trajectories from pure noise using the reverse diffusion process
 
@@ -140,28 +203,21 @@ class DiffusionWrapper(nn.Module):
             alpha_bar_t = self.alpha_bar[t]
             alpha_bar_t_prev = self.alpha_bar[t - 1] if t > 0 else torch.tensor(1.0, device=device)
 
-            if conditioning is not None:
-                x_t_tiled = x_t.repeat(2, 1, 1)
-                time_t_tiled = time_t.repeat(2)
-                conditioning_0 = conditioning[0][0].repeat(2, 1, 1)
-                conditioning_1 = torch.cat((conditioning[0][1], conditioning[1][1]))
-
-                eps = self.model(x_t_tiled, time_t_tiled, (conditioning_0, conditioning_1))
-                eps_c = eps[:eps.shape[0]//2, :, :]
-                eps_null = eps[eps.shape[0]//2:, :, :]
-
-                w = 0
-                model_output = (1 + w) * eps_c - w * eps_null
-            else:
-                model_output = self.model(x_t, time_t, None)
+            model_output = self.model_out_cfg(x_t, time_t, local_conditioning, global_conditioning, w)
 
             # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
-            if self.predict_epsilon:
+            if self.args[0].predict == "epsilon":
                 x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * model_output) / torch.sqrt(alpha_bar_t)
 
+            elif self.args[0].predict == "v":
+                x_0_hat = torch.sqrt(alpha_bar_t) * x_t - torch.sqrt(1 - alpha_bar_t) * model_output
+
             # Otherwise just use predicted \hat{x_0}
-            else:
+            elif self.args[0].predict == "x":
                 x_0_hat = model_output
+
+            else:
+                raise ValueError("Predict should be epsilon, x or v")
 
             # Compute posterior mean
             c1 = (torch.sqrt(alpha_bar_t_prev) * beta_t) / (1.0 - alpha_bar_t)
@@ -184,7 +240,9 @@ class DiffusionWrapper(nn.Module):
                     horizon: int,
                     device: str,
                     S: int,
-                    conditioning: tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] = None,
+                    local_conditioning: torch.Tensor,
+                    global_conditioning: torch.Tensor,
+                    w: float,
                     ) -> torch.Tensor:
         """
         Sample with DDIM
@@ -203,6 +261,27 @@ class DiffusionWrapper(nn.Module):
 
         # Start from pure noise
         x_t = torch.randn((batch_size, horizon, self.unet_args.traj_dim), device=device)
+
+        # Just predict x_0_hat and call it a day
+        if S == 1:
+            t = 50
+            time_t = torch.ones(batch_size, device=device).long() * t
+            alpha_bar_t = self.alpha_bar[t]
+
+            # Step 3: Get model output
+            model_output = self.model_out_cfg(x_t, time_t, local_conditioning, global_conditioning, w)
+
+            # Step 4: Reconstruct x_0 based on prediction type
+            if self.args[0].predict == "epsilon":
+                x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * model_output) / torch.sqrt(alpha_bar_t)
+            elif self.args[0].predict == "v":
+                x_0_hat = torch.sqrt(alpha_bar_t) * x_t - torch.sqrt(1 - alpha_bar_t) * model_output
+            elif self.args[0].predict == "x":
+                x_0_hat = model_output
+            else:
+                raise NotImplementedError("Unknown prediction type")
+
+            return x_0_hat.detach()
 
         # https://arxiv.org/pdf/2305.08891
 
@@ -224,141 +303,105 @@ class DiffusionWrapper(nn.Module):
             alpha_bar_t = self.alpha_bar[t]
             alpha_bar_t_prev = self.alpha_bar[t_prev] if t > 0 else torch.tensor(1.0, device=device)
 
-            if conditioning is not None:
-                x_t_tiled = x_t.repeat(2, 1, 1)
-                time_t_tiled = time_t.repeat(2)
-                conditioning_0 = conditioning[0][0].repeat(2, 1, 1)
-                conditioning_1 = torch.cat((conditioning[0][1], conditioning[1][1]))
+            model_output = self.model_out_cfg(x_t, time_t, local_conditioning, global_conditioning, w)
 
-                eps = self.model(x_t_tiled, time_t_tiled, (conditioning_0, conditioning_1))
-                eps_c = eps[:eps.shape[0]//2, :, :]
-                eps_null = eps[eps.shape[0]//2:, :, :]
-
-                w = 0
-                model_output = (1 + w) * eps_c - w * eps_null
-            else:
-                model_output = self.model(x_t, time_t, None)
-
-            # If predicting epsilon reconstruct \hat{x_0} from predicted epsilon
-            if self.predict_epsilon:
+            # Predict \hat{x_0}
+            if self.args[0].predict == "epsilon":
+                epsilon_hat = model_output
                 x_0_hat = (x_t - torch.sqrt(1 - alpha_bar_t) * model_output) / torch.sqrt(alpha_bar_t)
+            elif self.args[0].predict == "v":
+                epsilon_hat = torch.sqrt(alpha_bar_t) * model_output + torch.sqrt(1 - alpha_bar_t) * x_t
+                x_0_hat = torch.sqrt(alpha_bar_t) * x_t - torch.sqrt(1 - alpha_bar_t) * model_output
+            elif self.args[0].predict == "x":
+                x_0_hat = model_output
+                epsilon_hat = (x_t - torch.sqrt(alpha_bar_t) * x_0_hat) / torch.sqrt(1 - alpha_bar_t)
 
             # Otherwise just use predicted \hat{x_0}
             else:
-                raise NotImplementedError("whoops didn't implement ddim for x_theta model")
+                raise NotImplementedError("whoops didn't implement ddim")
 
             # Compute posterior mean
             c1 = torch.sqrt(alpha_bar_t_prev)
             c2 = torch.sqrt(1 - alpha_bar_t_prev)
-            x_t = c1 * x_0_hat + c2 * model_output
+            x_t = c1 * x_0_hat + c2 * epsilon_hat
 
         return x_t.detach()
 
-    def consistency_step(
-        self,
-        x_n: torch.Tensor,
-        c_local: torch.Tensor,
-        c_global: torch.Tensor,
-        t_n: torch.Tensor,
-        w: torch.Tensor,
-    ) -> torch.Tensor:
+    @torch.no_grad()
+    def sample(self,
+               batch_size: int,
+               horizon: int,
+               device: str,
+               local_conditioning: torch.Tensor,
+               global_conditioning: torch.Tensor,
+               sampler: tuple[SamplerType, int],
+               decoder_downsample: int = 1,
+               w: float = 0.0
+               ) -> torch.Tensor:
         """
-        LCM to produce z_0
+        1. Samples latents from pure noise using the reverse diffusion process.
+        2. Decodes latents using the VAE decoder.
 
-        Args:
-            z_n (torch.Tensor): Noised latent: [B, horizon, horizon]
-            c_local (torch.Tensor): x_{-p:0} -> [B, p, 3]
-            c_global (torch.Tensor): c -> [B, 4, 4]
-            t_n (torch.Tensor): [B]
-            w (torch.Tensor): [B]
-
+        Parameters:
+            batch_size: number of trajectories to generate
+            horizon: length of each trajectory. must be divisible by 4 (VAE) * 8 (diffusion) = 32
+            device: device for pytorch tensors
+            local_conditioning: Set of waypoints given as [batch_size x 6  x 3] where the center is the initial state
+            global_conditioning: Set of waypoints given as [batch_size x 4  x 4]
+            sampler: SamplerType and number of steps
+            decoder_downsample: What factor VAE downsample the trajectory (1 == no decoder)
+            w: Classifier free guidance weight
         Returns:
-            torch.Tensor: [B, horizon, horizon]
+            x: Generated trajectories of shape [batch_size x horizon x traj_dim]
         """
-        # this is a hack should fix at some point
-        if not hasattr(self, "null_token_global"):
-            self.null_token_global = 5 * torch.ones(self.args[1].conditioning[1], device=x_n.device).reshape((1, 1, -1))
 
-        alpha_t = self.alpha_bar[t_n].unsqueeze(-1).unsqueeze(-1)
+        diffusion_downsample = 2 ** (len(self.args[1].channel_mults) - 1)
+        assert horizon % (decoder_downsample * diffusion_downsample) == 0
 
-        x_n_tiled = x_n.repeat(2, 1, 1)
-        time_n_tiled = t_n.repeat(2)
-        conditioning_0 = c_local.repeat(2, 1, 1)
-        conditioning_1 = torch.cat((
-            c_global,
-            self.null_token_global.expand((
-                c_global.shape[0], c_global.shape[1], -1
-            ))
-        ))
-        model_output = self.model(x_n_tiled, time_n_tiled, (conditioning_0, conditioning_1))
-        eps_c = model_output[:model_output.shape[0]//2, :, :]
-        eps_null = model_output[model_output.shape[0]//2:, :, :]
-        epsilon = (1 + w) * eps_c - w * eps_null
+        sample_horizon = horizon // decoder_downsample
 
-        # This isn't really a real value for my data but this function is just here to serve as a boundary condition
-        sigma_data = 0.5
-        # Scaling that affects smoothness of boundary condition larger = sharper
-        s = 10.0
-        c_skip = (sigma_data ** 2) / (torch.pow(s * t_n, 2) + sigma_data ** 2)
-        c_out = (s * t_n) / torch.sqrt(torch.pow(s * t_n, 2) + sigma_data ** 2)
+        if sampler[0] == SamplerType.DDPM:
+            trajectories = self.sample_ddpm(
+                batch_size, sample_horizon, device, local_conditioning, global_conditioning, w
+            )
+        elif sampler[0] == SamplerType.DDIM:
+            trajectories = self.sample_ddim(
+                batch_size, sample_horizon, device, sampler[1], local_conditioning, global_conditioning, w
+            )
+        else:
+            raise ValueError(f"Sampler {sampler} not implemented.")
 
-        x_0_hat = (x_n - torch.sqrt(1 - alpha_t) * epsilon) / torch.sqrt(alpha_t)
+        if self.decoder:
+            trajectories = self.decoder(trajectories)
 
-        # This boundary condition enforces that at t=0 we get the initial latent back in a smooth differential way
-        return c_skip.unsqueeze(-1).unsqueeze(-1) * x_n + c_out.unsqueeze(-1).unsqueeze(-1) * x_0_hat
-
-    def sample_consistency(self,
-                           batch_size: int,
-                           horizon: int,
-                           device: str,
-                           S: int,
-                           c_local: torch.Tensor,
-                           c_global: torch.Tensor,
-                           ) -> torch.Tensor:
-        # Start from pure noise
-        x_t = torch.randn((batch_size, horizon, self.unet_args.traj_dim), device=device)
-
-        # https://arxiv.org/pdf/2305.08891
-
-        # Leading, since n=T is the first step
-        timesteps = np.arange(0, self.n_timesteps - 1, int(self.n_timesteps / (S - 1)))
-        timesteps = np.append(np.array([-1]), timesteps)
-
-        w = 0.0
-        t_n = torch.ones(batch_size, device=device).long() * (self.n_timesteps - 1)
-        x_0 = self.consistency_step(x_t, c_local, c_global, t_n, w)
-        for t in reversed(timesteps):
-            t_n = torch.ones(batch_size, device=device).long() * t
-
-            alpha_t = self.alpha_bar[t].unsqueeze(-1).unsqueeze(-1)
-            epsilon = torch.randn_like(x_t)
-            x_t = torch.sqrt(alpha_t) * x_0 + torch.sqrt(1 - alpha_t) * epsilon
-
-            x_0 = self.consistency_step(x_t, c_local, c_global, t_n, w)
-
-        return x_0.detach()
+        return trajectories
 
 
-class LatentDiffusionWrapper(nn.Module):
+class ConsistencyTrajectoryWrapper(nn.Module):
     def __init__(
         self,
-        args: Tuple[
-            LatentDiffusionWrapperArgs,
-            Unet1DArgs,
-        ],
+        args: Tuple[DiffusionWrapperArgs, Unet1DArgs],
     ):
+        """
+        Wrapper that noises sample and computes the loss for a denoising diffusion model
+        """
         super().__init__()
+        diffusion_args: DiffusionWrapperArgs = args[0]
+        unet_args: Unet1DArgs = args[1]
+        # assert isinstance(diffusion_args, DiffusionWrapperArgs), "diffusion_args must be of type DiffusionWrapperArgs"
+        assert isinstance(unet_args, Unet1DArgs), "unet_args must be of type Unet1DArgs"
 
-        self.args = list(args)
-        self.diffusion = DiffusionWrapper((
-            DiffusionWrapperArgs(
-                predict_epsilon=args[0].predict_epsilon,
-                loss=args[0].loss,
-                loss_params=args[0].loss_params,
-                n_timesteps=args[0].n_timesteps
-            ),
-            self.args[1],
-        ))
+        self.args = args
+        self.diffusion_args = diffusion_args
+        self.unet_args = unet_args
+
+        assert self.diffusion_args.predict == "g"
+        assert self.unet_args.context_mlp == "time=t,s"
+
+        loss = diffusion_args.loss
+
+        # Model to either predict epsilon or x_t directly
+        self.model = Unet1D(unet_args)
 
         self.null_token_local: torch.Tensor
         self.register_buffer("null_token_local", 5 * torch.ones(args[1].conditioning[0]).reshape((1, 1, -1)))
@@ -369,48 +412,80 @@ class LatentDiffusionWrapper(nn.Module):
         self.encoder: Callable[[torch.Tensor], tuple[torch.Tensor, torch.Tensor]] = None
         self.decoder: Callable[[torch.Tensor], torch.Tensor] = None
 
-    def compute_loss(self, batch: dict[str, torch.Tensor], **kwargs) -> torch.Tensor:
+        self.T = 1.0
+
+        if loss == "MSELoss":
+            self.loss = MSELoss()
+        elif loss == "L1Loss":
+            self.loss = L1Loss()
+        elif loss == "WeightedL1Loss":
+            self.loss = WeightedL1Loss(self.args[0].loss_params)
+        else:
+            raise NotImplementedError(f"{loss} loss module is not supported")
+
+    def G(self, x_t: torch.Tensor, t: torch.Tensor, s: torch.Tensor, conditioning):
+        ts = torch.stack((t, s), dim=1)
+
+        return (s / t).unsqueeze(-1).unsqueeze(-1) * x_t + (1.0 - s / t).unsqueeze(-1).unsqueeze(-1) * self.model(x_t, ts, conditioning)
+
+    def compute_loss(*args, **kwargs):
         """
-        Compute loss for the given trajectory
-        Args:
-            batch:
-                - x_0 (torch.Tensor): [B, Horizon, 3]
-                - conditioning (torch.Tensor): [B, 7, 4]
-            kwargs (dict): Capture any additional arguments
-
-        Returns:
-            torch.Tensor: Loss value
+        Method isn't used just provides loss titles
         """
-        assert self.encoder is not None, "Encoder has not been set"
 
-        # [B, Horizon // 4, VAE_latent_dim]
-        latent_trajectory, _ = self.encoder(batch["x_0"])
+        return {
+            "loss": 0.0,
+            "ctm": 0.0,
+            "dsm": 0.0,
+        }
 
-        batch_size = latent_trajectory.shape[0]
-        mask = torch.rand(batch_size, device=latent_trajectory.device) < self.args[0].dropout
-        batch["global_conditioning"][mask] = self.null_token_global.expand((
-            -1, batch["global_conditioning"].shape[1], -1
-        ))
-        # mask = torch.rand(batch_size, device=latent_trajectory.device) < self.args[0].dropout
-        # batch["local_conditioning"][mask] = self.null_token_local.expand((
-        #     -1, batch["local_conditioning"].shape[1], -1
-        # ))
+    @torch.no_grad()
+    def sample_gamma(
+        self,
+        batch_size,
+        horizon,
+        local_conditioning,
+        global_conditioning,
+        device: str,
+        N=1,
+        gamma: float = 0.1,
+    ):
+        x_t = torch.randn((batch_size, horizon, self.unet_args.traj_dim), device=device)
 
-        horizon_downsample_factor = 2 ** (len(self.args[1].channel_mults)-1)
-        horizon_modulo = latent_trajectory.shape[-2] % horizon_downsample_factor
-        assert horizon_modulo == 0, f"Invalid input data not divisible has module: {horizon_modulo}"
+        def get_t_tensor(t): return torch.full((batch_size,), float(t), device=device)
 
-        return self.diffusion.compute_loss(latent_trajectory, conditioning=(batch["local_conditioning"], batch["global_conditioning"]))
+        if N == 1:
+            return self.model(x_t, get_t_tensor(1.0).unsqueeze(1).repeat(1, 2), (local_conditioning, global_conditioning))
+
+        T = 1.
+        timesteps = (T * (torch.arange(N+1) / N) + 1e-9).flip(0)
+
+        for n in range(N):
+            t_n = get_t_tensor(timesteps[n])
+            t_next = get_t_tensor(timesteps[n + 1])
+            t_tilde = np.sqrt(1.0 - gamma**2) * t_next
+
+            # Denoise jump  t_n → t̃_{n+1}
+            x_tilde = self.G(x_t, t_n, t_tilde, (local_conditioning, global_conditioning))
+
+            if gamma == 0.0:
+                x_t = x_tilde
+            else:
+                eps = torch.randn_like(x_t)
+                x_t = x_tilde + gamma * torch.sqrt(t_next).view(-1, 1, 1) * eps
+
+        return x_t
 
     @torch.no_grad()
     def sample(self,
                batch_size: int,
                horizon: int,
-               vae_downsample: int,
                device: str,
                local_conditioning: torch.Tensor,
                global_conditioning: torch.Tensor,
-               sampler: SamplerType,
+               sampler: tuple[SamplerType, int],
+               decoder_downsample: int = 1,
+               w: float = 0.0
                ) -> torch.Tensor:
         """
         1. Samples latents from pure noise using the reverse diffusion process.
@@ -419,42 +494,30 @@ class LatentDiffusionWrapper(nn.Module):
         Parameters:
             batch_size: number of trajectories to generate
             horizon: length of each trajectory. must be divisible by 4 (VAE) * 8 (diffusion) = 32
-            vae_downsample: What factor VAE downsample the trajectory
             device: device for pytorch tensors
             local_conditioning: Set of waypoints given as [batch_size x 6  x 3] where the center is the initial state
             global_conditioning: Set of waypoints given as [batch_size x 4  x 4]
-            sampler: SamplerType
+            sampler: SamplerType and number of steps
+            decoder_downsample: What factor VAE downsample the trajectory (1 == no decoder)
+            w: Classifier free guidance weight
         Returns:
             x: Generated trajectories of shape [batch_size x horizon x traj_dim]
         """
-        assert self.decoder is not None, "Need to attach a decoder"
 
         diffusion_downsample = 2 ** (len(self.args[1].channel_mults) - 1)
-        assert horizon % (vae_downsample * diffusion_downsample) == 0
+        assert horizon % (decoder_downsample * diffusion_downsample) == 0
 
-        latent_horizon = horizon // vae_downsample
+        sample_horizon = horizon // decoder_downsample
 
-        conditioning = (local_conditioning, global_conditioning)
-        null_conditioning = (
-            self.null_token_local.expand((batch_size, local_conditioning.shape[1], -1)),
-            self.null_token_global.expand((batch_size, global_conditioning.shape[1], -1))
+        trajectories = self.sample_gamma(
+            batch_size, sample_horizon, local_conditioning, global_conditioning, device, sampler[1]
         )
+        # if sampler[0] == SamplerType.GAMMA_CTM:
+        #     pass
+        # else:
+        #     raise ValueError(f"Sampler {sampler} not implemented.")
 
-        if sampler == SamplerType.DDPM:
-            latent_trajectories = self.diffusion.sample(
-                batch_size, latent_horizon, device, conditioning=(conditioning, null_conditioning)
-            )
-        elif sampler == SamplerType.DDIM:
-            latent_trajectories = self.diffusion.sample_ddim(
-                batch_size, latent_horizon, device, 4, conditioning=(conditioning, null_conditioning)
-            )
-        elif sampler == SamplerType.CONSISTENCY:
-            latent_trajectories = self.diffusion.sample_consistency(
-                batch_size, latent_horizon, device, 4, local_conditioning, global_conditioning
-            )
-        else:
-            raise ValueError(f"Sampler {sampler} not implemented.")
-
-        trajectories = self.decoder(latent_trajectories)
+        if self.decoder:
+            trajectories = self.decoder(trajectories)
 
         return trajectories

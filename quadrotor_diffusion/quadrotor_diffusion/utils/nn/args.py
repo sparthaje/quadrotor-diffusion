@@ -23,15 +23,16 @@ class Unet1DArgs:
 @dataclass
 class DiffusionWrapperArgs:
     """
-    predict_epsilon: Whether the model should predict epsilon or x_0 directly from x_t
+    predict: ["x", "epsilon", "v"]
     loss: An nn.Module wrapper of a loss function (can be dynamic with learnable parameters)
     loss_params: Tuple of data to pass into lsoss initialization varies by loss
     n_timesteps: Number of diffusion timesteps
     """
-    predict_epsilon: bool
+    predict: str
     loss: str
     loss_params: Tuple
     n_timesteps: int
+    dropout: float
 
 
 @dataclass

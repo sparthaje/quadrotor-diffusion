@@ -145,7 +145,6 @@ class Decoder1D(nn.Module):
         z: [batch_size x compressed_horizon x latent_dim]
         returns: [batch_size x horizon x traj_dim]
         """
-
         z = einops.rearrange(z, 'b h l -> b l h')
         x = self.init_conv(z)
 

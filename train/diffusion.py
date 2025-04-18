@@ -7,7 +7,8 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper
+from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper, SamplerType
+from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
 from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.quad_logging import dataclass_to_table
@@ -23,7 +24,8 @@ os.environ['DEBUG'] = 'True' if args.debug else 'False'
 
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(root_dir)
-config_module = importlib.import_module(f'configs.{args.config}')
+cfg_name = args.config if "_cfg" in args.config else args.config + "_cfg"
+config_module = importlib.import_module(f'configs.{cfg_name}')
 
 unet_args: Unet1DArgs = config_module.unet_args
 diff_args: DiffusionWrapperArgs = config_module.diff_args
@@ -51,8 +53,31 @@ while trainer.epoch < N_epochs:
     trainer.args.max_epochs += train_args.evaluate_every
     trainer.train()
 
-    sample_trajectories = diff_model.sample(batch_size=10, horizon=360, device=train_args.device)
-    print(sample_trajectories.shape)
+    sampling_model: DiffusionWrapper = trainer.ema_model if trainer.ema_model is not None else diff_model
+
+    idxs = np.random.choice(len(dataset), 5, replace=False)
+    slices = []
+    for i in idxs:
+        c = dataset[i]["local_conditioning"].unsqueeze(0)
+        slices.append(c)
+        slices.append(c)
+
+    local_conditioning = torch.concat(slices).to(train_args.device)
+    global_conditioning = sampling_model.null_token_global.expand((10, 4, -1))
+
+    # [10, n, 3]
+    sample_trajectories = sampling_model.sample(
+        batch_size=10,
+        horizon=dataset[0]["x_0"].shape[0],
+        device=train_args.device,
+        local_conditioning=local_conditioning,
+        global_conditioning=global_conditioning,
+        sampler=(SamplerType.DDPM, None),
+    )
+
+    # Cut the local conditioning to only be the prior states
+    sample_trajectories = torch.concat((local_conditioning, sample_trajectories), dim=1)
+
     fig, axes = create_course_grid(sample_trajectories)
 
     save_dir = os.path.join(trainer.args.log_dir, "samples", "training")

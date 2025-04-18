@@ -11,7 +11,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from quadrotor_diffusion.utils.nn.training import Trainer
-from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper, SamplerType
+from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper, SamplerType
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer
 from quadrotor_diffusion.utils.nn.args import TrainerArgs
@@ -45,8 +45,8 @@ print(chkpt)
 sample_dir = get_sample_folder("logs/training", ldm_experiment)
 print(sample_dir)
 
-model: LatentDiffusionWrapper = None
-ema: LatentDiffusionWrapper = None
+model: DiffusionWrapper = None
+ema: DiffusionWrapper = None
 normalizer: Normalizer = None
 trainer_args: TrainerArgs = None
 
@@ -71,24 +71,29 @@ with open(os.path.join(sample_dir, "overview.txt"), "w") as f:
     )
 
 model = diff if args.no_ema else ema
+model.encoder = vae_wrapper.encoder
 model.decoder = vae_wrapper.decode
 model.to(args.device)
 
+sampler_name, steps = args.sampler.split(",")
+
 sampler = None
-if args.sampler == "DDPM":
-    sampler = SamplerType.DDPM
-elif args.sampler == "DDIM":
-    sampler = SamplerType.DDIM
+if sampler_name == "DDPM":
+    sampler = (SamplerType.DDPM, None)
+elif sampler_name == "DDIM":
+    sampler = (SamplerType.DDIM, int(steps))
+elif sampler_name == "GAMMA_CTM":
+    sampler = (SamplerType.GAMMA_CTM, int(steps))
 else:
     raise NotImplementedError(f"Sampler {args.sampler} not implemented")
 
-cudnn_benchmark(args.samples, model, vae_downsample, args.device, sampler=sampler)
+cudnn_benchmark(args.samples, model, vae_downsample, args.device, sampler=sampler, w=0.0)
 
 
 def evaluate(
     laps: int,
     samples: int,
-    model: LatentDiffusionWrapper,
+    model: DiffusionWrapper,
     course: str,
     device: str,
 ) -> tuple[bool, bool, float, float, int, float, float]:
@@ -137,12 +142,12 @@ def evaluate(
                 samples,
                 global_context,
                 sampler,
+                0.0,
                 ScoringMethod.FAST,
                 model,
                 vae_downsample,
                 device,
-                current_traj=current_traj,
-                return_all_samples=True
+                current_traj
             )
         except ValueError:
             return True, False, dep, dev, generated_plans, 0.0, total_computation_time

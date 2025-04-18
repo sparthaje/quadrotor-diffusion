@@ -7,10 +7,10 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-from quadrotor_diffusion.models.diffusion_wrapper import LatentDiffusionWrapper, SamplerType
+from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper, SamplerType
 from quadrotor_diffusion.models.vae_wrapper import VAE_Wrapper
 from quadrotor_diffusion.utils.nn.training import Trainer
-from quadrotor_diffusion.utils.nn.args import LatentDiffusionWrapperArgs, Unet1DArgs, TrainerArgs
+from quadrotor_diffusion.utils.nn.args import DiffusionWrapperArgs, Unet1DArgs, TrainerArgs
 from quadrotor_diffusion.utils.quad_logging import dataclass_to_table
 from quadrotor_diffusion.utils.file import get_checkpoint_file
 from quadrotor_diffusion.utils.plotting import create_course_grid
@@ -28,7 +28,7 @@ cfg_name = args.config if "_cfg" in args.config else args.config + "_cfg"
 config_module = importlib.import_module(f'configs.{cfg_name}')
 
 unet_args: Unet1DArgs = config_module.unet_args
-diff_args: LatentDiffusionWrapperArgs = config_module.diff_args
+diff_args: DiffusionWrapperArgs = config_module.diff_args
 train_args: TrainerArgs = config_module.train_args
 dataset: torch.utils.data.Dataset = config_module.dataset
 
@@ -44,7 +44,7 @@ print(dataclass_to_table(diff_args))
 print(dataclass_to_table(train_args))
 print("\n" + "="*100 + "\n")
 
-diff_model = LatentDiffusionWrapper((
+diff_model = DiffusionWrapper((
     diff_args,
     unet_args,
 ))
@@ -63,7 +63,7 @@ while trainer.epoch < N_epochs:
     trainer.train()
 
     vae_downsample = 2 ** (len(vae_wrapper.args[1].channel_mults) - 1)
-    sampling_model: LatentDiffusionWrapper = trainer.ema_model if trainer.ema_model is not None else diff_model
+    sampling_model: DiffusionWrapper = trainer.ema_model if trainer.ema_model is not None else diff_model
 
     idxs = np.random.choice(len(dataset), 5, replace=False)
     slices = []
@@ -79,11 +79,11 @@ while trainer.epoch < N_epochs:
     sample_trajectories = sampling_model.sample(
         batch_size=10,
         horizon=dataset[0]["x_0"].shape[0],
-        vae_downsample=vae_downsample,
         device=train_args.device,
         local_conditioning=local_conditioning,
         global_conditioning=global_conditioning,
-        sampler=SamplerType.DDPM,
+        sampler=(SamplerType.DDPM, None),
+        decoder_downsample=vae_downsample,
     )
 
     # Cut the local conditioning to only be the prior states
