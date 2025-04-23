@@ -54,11 +54,23 @@ diff, ema, normalizer, trainer_args = Trainer.load(chkpt)
 print(f"Loaded {chkpt}")
 print(f"Using {normalizer}")
 
-chkpt = get_checkpoint_file("logs/training", vae_experiment)
-vae_wrapper: VAE_Wrapper = None
-vae_wrapper, _, _, _ = Trainer.load(chkpt, get_ema=False)
-vae_wrapper.to(args.device)
-vae_downsample = 2 ** (len(vae_wrapper.args[1].channel_mults) - 1)
+model = diff if args.no_ema else ema
+model.to(args.device)
+
+if ldm_experiment == 237:
+    model.alpha_bar[-1] = 0.05
+
+if vae_experiment > 0:
+    chkpt = get_checkpoint_file("logs/training", vae_experiment)
+    vae_wrapper: VAE_Wrapper = None
+    vae_wrapper, _, _, _ = Trainer.load(chkpt, get_ema=False)
+    vae_wrapper.to(args.device)
+
+    model.encoder = vae_wrapper.encoder
+    model.decoder = vae_wrapper.decode
+    vae_downsample = 2 ** (len(vae_wrapper.args[1].channel_mults) - 1)
+else:
+    vae_downsample = 1
 
 with open(os.path.join(sample_dir, "overview.txt"), "w") as f:
     f.write(
@@ -69,11 +81,6 @@ with open(os.path.join(sample_dir, "overview.txt"), "w") as f:
         f"Sampling Method: {args.sampler}\n" +
         f"VAE Checkpoint: {chkpt}\n"
     )
-
-model = diff if args.no_ema else ema
-model.encoder = vae_wrapper.encoder
-model.decoder = vae_wrapper.decode
-model.to(args.device)
 
 sampler_name, steps = args.sampler.split(",")
 
@@ -96,7 +103,7 @@ def evaluate(
     model: DiffusionWrapper,
     course: str,
     device: str,
-) -> tuple[bool, bool, float, float, int, float, float]:
+) -> tuple[bool, bool, float, float, int, float, float, float, float]:
     """
     Evaluates the planner on one course
 
@@ -108,7 +115,7 @@ def evaluate(
         device (str)
 
     Returns:
-        tuple[bool, bool, float, float, float, int, float, float]:
+        tuple[bool, bool, float, float, float, int, float, float, float, float]:
             - Planner Failure
             - Worked in Simulation
             - ∆EP - Sum of Delta Expected Position (averaged across trajectories sampled) for each plan
@@ -116,6 +123,8 @@ def evaluate(
             - Generated Plans
             - ATE - Average positional tracking error across the whole course
             - Total computation time for all plans
+            - %of trajectories that passed filtering stage
+            - Mean of the mean pairwise euclidean distance across all timesteps of valid samples
     """
     course: np.ndarray = np.load(course)
     current_traj = None
@@ -130,6 +139,8 @@ def evaluate(
     dep = 0.0
     dev = 0.0
     total_computation_time = 0.0
+    total_candidates = 0
+    mmpwed_sum = 0.0
 
     for i in range(iterations):
         global_context = course
@@ -150,7 +161,7 @@ def evaluate(
                 current_traj
             )
         except ValueError:
-            return True, False, dep, dev, generated_plans, 0.0, total_computation_time
+            return True, False, dep, dev, generated_plans, 0.0, total_computation_time, total_candidates, mmpwed_sum
 
         trajectories.append(next_traj)
 
@@ -178,6 +189,17 @@ def evaluate(
         dep += delta_x0_avg
         dev += delta_v0_avg
 
+        total_candidates += 100 * (generated_samples.shape[0]) / samples
+
+        B, N, _ = generated_samples.shape
+        if B > 1:
+            dists = []
+            for t in range(N):
+                pts = generated_samples[:, t, :]            # (B,3)
+                pd = torch.pdist(pts, p=2)      # (B*(B−1)/2,)
+                dists.append(pd.mean())
+            mmpwed_sum += torch.stack(dists).mean().item()
+
         gate_idx += 1
         current_traj = next_traj
         generated_plans += 1
@@ -201,6 +223,8 @@ def evaluate(
         generated_plans,
         np.linalg.norm(compute_tracking_error(ref_pos, states[0])),
         total_computation_time,
+        total_candidates,
+        mmpwed_sum
     )
 
 
@@ -221,6 +245,8 @@ courses_total = len(courses)
 dep_total = 0.
 dev_total = 0.
 total_computation_time = 0.
+total_candidates_considered = 0
+total_mmpwed_sum = 0.0
 generated_plans_total = 0
 
 planner_failures = []
@@ -235,6 +261,8 @@ for course in tqdm.tqdm(courses):
         generated_plans,
         tracking_error,
         computation_time,
+        candidates,
+        mmpwed_sum
     ) = evaluate(
         args.laps,
         args.samples,
@@ -260,6 +288,8 @@ for course in tqdm.tqdm(courses):
         dep_total += dep
         dev_total += dev
         total_computation_time += computation_time
+        total_candidates_considered += candidates
+        total_mmpwed_sum += mmpwed_sum
         generated_plans_total += generated_plans
 
 
@@ -273,6 +303,8 @@ class Metrics:
     delta_ep: float
     delta_ev: float
     planner_hz: float
+    candidates: float
+    variety: float
 
 
 metrics = Metrics(
@@ -283,7 +315,9 @@ metrics = Metrics(
     avg_tracking_error=average_tracking_error / courses_success if courses_success > 0 else float('inf'),
     delta_ep=dep_total / generated_plans_total,
     delta_ev=dev_total / generated_plans_total,
-    planner_hz=generated_plans_total / total_computation_time
+    candidates=total_candidates_considered / generated_plans_total,
+    planner_hz=generated_plans_total / total_computation_time,
+    variety=total_mmpwed_sum / generated_plans_total,
 )
 
 print(dataclass_to_table(metrics))

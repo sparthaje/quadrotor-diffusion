@@ -20,7 +20,7 @@ unet_args = Unet1DArgs(
 )
 
 diff_args = DiffusionWrapperArgs(
-    predict="epsilon",
+    predict="v",
     loss="L1Loss",
     n_timesteps=100,
     loss_params=None,
@@ -40,7 +40,7 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:3",
+    device="cuda:2",
     max_epochs=400,
     evaluate_every=5,
     description=""

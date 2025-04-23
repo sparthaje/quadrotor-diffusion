@@ -509,13 +509,12 @@ class ConsistencyTrajectoryWrapper(nn.Module):
 
         sample_horizon = horizon // decoder_downsample
 
-        trajectories = self.sample_gamma(
-            batch_size, sample_horizon, local_conditioning, global_conditioning, device, sampler[1]
-        )
-        # if sampler[0] == SamplerType.GAMMA_CTM:
-        #     pass
-        # else:
-        #     raise ValueError(f"Sampler {sampler} not implemented.")
+        if sampler[0] == SamplerType.GAMMA_CTM:
+            trajectories = self.sample_gamma(
+                batch_size, sample_horizon, local_conditioning, global_conditioning, device, sampler[1]
+            )
+        else:
+            raise ValueError(f"Sampler {sampler} not implemented.")
 
         if self.decoder:
             trajectories = self.decoder(trajectories)

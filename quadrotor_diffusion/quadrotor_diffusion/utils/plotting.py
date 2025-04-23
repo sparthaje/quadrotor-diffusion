@@ -12,7 +12,11 @@ from matplotlib.legend_handler import HandlerBase
 import numpy as np
 import torch
 from scipy.signal import savgol_filter
+from scipy.spatial.transform import Rotation as R
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
+
+from quadrotor_diffusion.utils.trajectory import INITIAL_GATE_EXIT
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
@@ -504,3 +508,136 @@ def create_course_grid(trajectories: torch.Tensor) -> tuple[plt.Figure, np.ndarr
 
     plt.tight_layout()
     return fig, axes
+
+
+def course_base_plot_3d(course: list[np.array], initial_position: np.ndarray = None, has_end=False) -> plt.Axes:
+    """
+    Renders a still 3D plot of the course with gates using a fixed PERSPECTIVE view.
+
+    Args:
+        course (list[np.array]): list of gates defined by [x, y, z, theta]
+    """
+    fig = plt.figure(figsize=(4, 4))
+    fig.subplots_adjust(0, 0, 1, 1)
+    ax = fig.add_subplot(111, projection='3d')
+
+    ax.axis('off')
+    ax.grid(False)
+    ax.set_xlim(-1.5, 1.5)
+    ax.set_ylim(-2, 2)
+    ax.set_zlim(0, 1.0)
+
+    def set_axes_equal(ax):
+        x_limits = ax.get_xlim3d()
+        y_limits = ax.get_ylim3d()
+        z_limits = ax.get_zlim3d()
+
+        x_range = x_limits[1] - x_limits[0]
+        y_range = y_limits[1] - y_limits[0]
+        z_range = z_limits[1] - z_limits[0]
+
+        max_range = max(x_range, y_range, z_range)
+        x_mid = (x_limits[0] + x_limits[1]) / 2
+        y_mid = (y_limits[0] + y_limits[1]) / 2
+        z_mid = (z_limits[0] + z_limits[1]) / 2
+
+        ax.set_xlim3d([x_mid - max_range / 2, x_mid + max_range / 2])
+        ax.set_ylim3d([y_mid - max_range / 2, y_mid + max_range / 2])
+        ax.set_zlim3d([z_mid - max_range / 2, z_mid + max_range / 2])
+
+    set_axes_equal(ax)
+
+    # Draw base rectangle
+    rectangle_vertices = np.array([
+        [-1.5, -2, 0],
+        [1.5, -2, 0],
+        [1.5, 2, 0],
+        [-1.5, 2, 0],
+        [-1.5, -2, 0]
+    ])
+    line = Line3DCollection([rectangle_vertices[:, :3]], colors='black', linewidths=1)
+    ax.add_collection3d(line)
+
+    GATE_WIDTH_2 = 0.5 / 2
+    to_loop = course[1:-1] if has_end else course[1:]
+    for x, y, z, theta in to_loop:
+        center = np.array([x, y, z])
+        left = R.from_euler('z', np.pi / 2).as_matrix() @ R.from_euler('z', theta).as_matrix() @ INITIAL_GATE_EXIT
+        top = np.array([0, 0, 1])
+        rectangle_vertices = [
+            center + GATE_WIDTH_2 * left + GATE_WIDTH_2 * top,
+            center + GATE_WIDTH_2 * left - GATE_WIDTH_2 * top,
+            center - GATE_WIDTH_2 * left - GATE_WIDTH_2 * top,
+            center - GATE_WIDTH_2 * left + GATE_WIDTH_2 * top,
+            center + GATE_WIDTH_2 * left + GATE_WIDTH_2 * top,
+        ]
+        rectangle_vertices = np.array(rectangle_vertices)
+        line = Line3DCollection([rectangle_vertices[:, :3]], colors='black', linewidths=2)
+        ax.add_collection3d(line)
+
+        post = [
+            center - GATE_WIDTH_2 * top,
+            center,
+        ]
+        post[-1][2] = 0.0
+        post = np.array(post)
+        ax.plot(post[:, 0], post[:, 1], post[:, 2], 'black', linewidth=2)
+
+    ax.view_init(elev=25, azim=-145)
+    ax.dist = 2
+
+    if initial_position is not None:
+        x, y, z = initial_position
+        LENGTH = 0.1 / 2
+        HEIGHT = LENGTH / 2
+
+        arms = np.array([
+            [LENGTH, 0, 0],
+            [-LENGTH, 0, 0],
+            [0, LENGTH, 0],
+            [0, -LENGTH, 0]
+        ])
+        stubs = np.array([
+            [LENGTH, 0, HEIGHT],
+            [-LENGTH, 0, HEIGHT],
+            [0, LENGTH, HEIGHT],
+            [0, -LENGTH, HEIGHT]
+        ])
+        arms += initial_position
+        stubs += initial_position
+
+        ax.plot([arms[0, 0], arms[1, 0]], [arms[0, 1], arms[1, 1]], [arms[0, 2], arms[1, 2]], 'k-', lw=2)
+        ax.plot([arms[2, 0], arms[3, 0]], [arms[2, 1], arms[3, 1]], [arms[2, 2], arms[3, 2]], 'k-', lw=2)
+        for i in range(4):
+            ax.plot([arms[i, 0], stubs[i, 0]], [arms[i, 1], stubs[i, 1]], [arms[i, 2], stubs[i, 2]], 'k-', lw=2)
+
+    return ax
+
+
+def add_trajectory_to_course_3d(ax: plt.Axes, trajectory: Union[PolynomialTrajectory, np.ndarray], velocity_profile=None, reference=False):
+    """
+    Add trajectory to a BEV gate plot with plt
+
+    Args:
+        axs (list[plt.Axes]): Axes to plot on
+        trajectory (Union[PolynomialTrajectory, np.ndarray]): Trajectory to pot
+        velocity_profile (_type_, optional): Velocity profile for trajectory. Defaults to deriving the given trajectory.
+        reference (bool, optional): Draw the trajectory as a red reference line. Defaults to False.
+    """
+
+    if isinstance(trajectory, PolynomialTrajectory):
+        ref_pos = trajectory.as_ref_pos()
+    else:
+        ref_pos = trajectory
+    ref_vel = derive_trajectory(ref_pos, ctrl_freq=30) if velocity_profile is None else velocity_profile
+
+    MIN_POINT_SIZE = 5
+    MAX_POINT_SIZE = 125
+    ref_pos = ref_pos[:-1, :]
+    point_sizes, colors = get_render_map(ref_vel, MAX_POINT_SIZE, MIN_POINT_SIZE)
+
+    if reference:
+        ref_color = matplotlib.rcParams['axes.prop_cycle'].by_key()['color'][2]
+        ax.plot(ref_pos[:, 0], ref_pos[:, 1], ref_pos[:, 2], c=ref_color, linewidth=2)
+    else:
+        ax.scatter(ref_pos[:, 0], ref_pos[:, 1], ref_pos[:, 2], s=0.1 * point_sizes, c=colors, marker='o', alpha=0.8)

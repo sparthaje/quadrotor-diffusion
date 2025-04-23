@@ -2,7 +2,7 @@ import enum
 import torch
 
 # Threshold between projected x_{i-1} and x_0 in planned trajectory to be acceptable
-THRESHOLD_FOR_INITIAL_STATE = 0.075  # [m]
+THRESHOLD_FOR_INITIAL_STATE = 0.1  # [m]
 
 # Threshold to be considered passing gate safely
 THRESHOLD_FOR_GATE = 0.15  # [m]
@@ -21,11 +21,15 @@ class ScoringMethod(enum.Enum):
     # Chooses trajectory with lowest curvature
     STRAIGHT = "straight"
 
+    # Chooses trajectory with the point closest to the gate position
+    CENTER = "center"
+
 
 def filter_valid_trajectories(
     trajectories: torch.Tensor,
     x_0: torch.Tensor,
     g_i: torch.Tensor,
+    start: bool,
 ) -> torch.Tensor:
     """
     Filters trajectories to ones which have a valid starting state and cross the next gate
@@ -39,7 +43,8 @@ def filter_valid_trajectories(
         torch.Tensor: Indexes in trajectories which are valid
     """
     dists0 = torch.norm(trajectories[:, 0, :] - x_0, dim=-1)
-    filtered_idxs = torch.nonzero(dists0 < THRESHOLD_FOR_INITIAL_STATE, as_tuple=True)[0]
+    threshold = 2 * THRESHOLD_FOR_INITIAL_STATE if start else THRESHOLD_FOR_INITIAL_STATE
+    filtered_idxs = torch.nonzero(dists0 < threshold, as_tuple=True)[0]
     if len(filtered_idxs) == 0:
         raise ValueError("Planner Failed Initial State")
 
@@ -95,3 +100,20 @@ def min_curvature(trajectories: torch.Tensor) -> torch.Tensor:
     angles = torch.acos(dots)
     avg_curvature = angles.mean(dim=1)
     return torch.argmin(avg_curvature)
+
+
+def center_gate(
+    trajectories: torch.Tensor,
+    g_i: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Args:
+        tra (torch.Tensor): Expected next state [n, 3] (i.e. x_{i-1} + v_{i-1} * t + a_{i-1} * t^2 / 2)
+        g_i (torch.Tensor): Next gate [x, y, z]
+
+    Returns:
+        torch.Tensor: Indexes in trajectories which are valid
+    """
+    dists_gate = torch.norm(trajectories - g_i, dim=-1)
+    min_dists, _ = dists_gate.min(dim=1)
+    return torch.argmin(min_dists)

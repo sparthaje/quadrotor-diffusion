@@ -9,7 +9,8 @@ from .scoring import (
     filter_valid_trajectories,
     fastest,
     slowest,
-    min_curvature
+    min_curvature,
+    center_gate,
 )
 
 from quadrotor_diffusion.models.diffusion_wrapper import DiffusionWrapper, SamplerType
@@ -97,8 +98,11 @@ def plan(
         local_conditioning = current_traj[0][-6:]
         local_conditioning = torch.tensor(local_conditioning, dtype=torch.float32).to(device)
 
-        null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (4 - len(course), 1))
-        global_conditioning = np.vstack((course, null_tokens))
+        if course.shape[0] < 4:
+            null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (4 - len(course), 1))
+            global_conditioning = np.vstack((course, null_tokens))
+        else:
+            global_conditioning = course[:4]
 
         t = 1/30
         x_0_expected = current_traj[0][-1] + current_traj[1][-1] * t + 0.5 * current_traj[2][-1] * t ** 2
@@ -108,8 +112,12 @@ def plan(
         local_conditioning = torch.tensor(np.tile(course[0], (6, 1)), dtype=torch.float32).to(device)
 
         global_conditioning = np.vstack((course[1:], course[1:0]))
-        null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (4 - len(global_conditioning), 1))
-        global_conditioning = np.vstack((global_conditioning, null_tokens))
+
+        if global_conditioning.shape[0] < 4:
+            null_tokens = np.tile(np.array(5 * np.ones((1, 4))), (4 - len(global_conditioning), 1))
+            global_conditioning = np.vstack((global_conditioning, null_tokens))
+        else:
+            global_conditioning = global_conditioning[:4]
 
         x_0_expected = torch.tensor(course[0][:3], dtype=torch.float32).to(device)
         g_i = torch.tensor(course[1][:3], dtype=torch.float32).to(device)
@@ -132,7 +140,7 @@ def plan(
 
     if not ignore_filter_step:
         # Filter candidates to ones which have a valid starting state and cross the next gate
-        candidates = trajectories[filter_valid_trajectories(trajectories, x_0_expected, g_i)]
+        candidates = trajectories[filter_valid_trajectories(trajectories, x_0_expected, g_i, current_traj is None)]
     else:
         candidates = trajectories
 
@@ -142,6 +150,8 @@ def plan(
         best_traj = slowest(candidates)
     elif scoring == ScoringMethod.STRAIGHT:
         best_traj = min_curvature(candidates)
+    elif scoring == ScoringMethod.CENTER:
+        best_traj = center_gate(candidates, g_i)
     else:
         raise ValueError(f"Scoring method {scoring} not implemented")
 
