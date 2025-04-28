@@ -40,7 +40,7 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:2",
+    device="cuda:1",
     max_epochs=400,
     evaluate_every=5,
     description=""
@@ -48,4 +48,4 @@ train_args = TrainerArgs(
 
 normalizer = NoNormalizer()
 
-dataset = DiffusionDataset("data", 128, normalizer)
+dataset = DiffusionDataset("data", 128, normalizer, "diffusion4")

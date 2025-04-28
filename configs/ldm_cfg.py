@@ -20,7 +20,7 @@ unet_args = Unet1DArgs(
 )
 
 diff_args = DiffusionWrapperArgs(
-    predict="v",
+    predict="epsilon",
     loss="L1Loss",
     n_timesteps=100,
     loss_params=None,
@@ -40,14 +40,14 @@ train_args = TrainerArgs(
 
     learning_rate=1e-4,
     num_gpus=1,
-    device="cuda:1",
+    device="cuda:3",
     max_epochs=400,
     evaluate_every=5,
     description=""
 )
 
-vae_experiment = 192
+vae_experiment = 249
 
 normalizer = NoNormalizer()
 
-dataset = DiffusionDataset("data", 128, normalizer)
+dataset = DiffusionDataset("data", 128, normalizer, folder="diffusion4")

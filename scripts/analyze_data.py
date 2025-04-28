@@ -20,6 +20,7 @@ class CourseStats:
     average_max_ttc: float = 0.0
     average_min_ttc: float = 0.0
     average_mean_ttc: float = 0.0
+    total_courses: int = 0
 
 
 def round_decimals(dataclass_instance):
@@ -44,7 +45,8 @@ for course_type in os.listdir(data_dir):
         "ttc_max": [],
         "ttc_min": [],
         "ttc_mean": [],
-        "total_samples": 0
+        "total_samples": 0,
+        "total_courses": 0
     }
 
     # Iterate over each sample course (e.g., 1, 2, 3)
@@ -53,6 +55,7 @@ for course_type in os.listdir(data_dir):
         if not os.path.isdir(sample_path):
             continue
 
+        course_stats["total_courses"] += 1
         valid_path = os.path.join(sample_path, "valid")
 
         if not os.path.exists(valid_path):
@@ -83,7 +86,8 @@ for course_type in os.listdir(data_dir):
         max_valid_count=np.max(course_stats["valid_counts"]) if course_stats["valid_counts"] else 0,
         average_max_ttc=np.mean(course_stats["ttc_max"]) if course_stats["ttc_max"] else 0,
         average_min_ttc=np.mean(course_stats["ttc_min"]) if course_stats["ttc_min"] else 0,
-        average_mean_ttc=np.mean(course_stats["ttc_mean"]) if course_stats["ttc_mean"] else 0
+        average_mean_ttc=np.mean(course_stats["ttc_mean"]) if course_stats["ttc_mean"] else 0,
+        total_courses=course_stats["total_courses"]
     )
 
 # Print results for each course type

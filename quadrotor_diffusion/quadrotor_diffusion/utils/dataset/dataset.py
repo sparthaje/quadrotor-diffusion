@@ -7,6 +7,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from scipy.spatial.transform import Rotation as R
 
 from quadrotor_diffusion.utils.dataset.normalizer import Normalizer, NormalizerTuple
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
@@ -108,7 +109,7 @@ class QuadrotorRaceSegmentDataset(Dataset):
         self.normalizer = normalizer
         self.traj_len = traj_len
         self.padding = padding
-        self.data: list[tuple[str, int, int]] = []  # trajectory filename, start index, end index
+        self.data: list[tuple[str, int, int, str]] = []  # trajectory filename, start index, end index
         self._load_data()
 
     def _load_data(self):
@@ -162,23 +163,29 @@ class QuadrotorRaceSegmentDataset(Dataset):
                                         axis=1,
                                     )
                                 )
-                                self.data.append((traj_filename, ref_pos_idx, ref_pos_idx+self.traj_len))
+                                self.data.append((traj_filename, ref_pos_idx, ref_pos_idx +
+                                                 self.traj_len, course_filename))
+                                for _ in range(3):
+                                    offset = random.randint(25, 50)
+                                    self.data.append((traj_filename, ref_pos_idx + offset,
+                                                     ref_pos_idx+self.traj_len + offset, course_filename))
 
                                 ref_pos_idx += ending_idx
 
-                            total_trajectory_length = int(sum(trajectory.segment_lengths) * 30)
-                            for _ in range(6):
-                                start = random.randint(0, total_trajectory_length - self.traj_len)
-                                end = start + self.traj_len
-                                self.data.append((traj_filename, start, end))
+                            # total_trajectory_length = int(sum(trajectory.segment_lengths) * 30)
+                            # for _ in range(6):
+                            #     start = random.randint(0, total_trajectory_length - self.traj_len)
+                            #     end = start + self.traj_len
+                            #     self.data.append((traj_filename, start, end))
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        trajectory_filename, start, end = self.data[idx]
+        trajectory_filename, start, end, course_filename = self.data[idx]
 
         assert trajectory_filename.endswith(".pkl")
+        assert course_filename.endswith(".npy")
 
         with open(trajectory_filename, "rb") as trajectory_file:
             trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
@@ -194,6 +201,7 @@ class QuadrotorRaceSegmentDataset(Dataset):
             trajectory.segment_lengths.append(trajectory.segment_lengths[2])
 
         trajectory: np.ndarray = trajectory.as_ref_pos()
+        course: np.ndarray = np.load(course_filename)
 
         trajectory = self.normalizer(trajectory)
 
@@ -206,14 +214,34 @@ class QuadrotorRaceSegmentDataset(Dataset):
 
             end += 2 * self.padding
 
-        return torch.tensor(trajectory[start:end], dtype=torch.float32)
+        trajectory_slice = trajectory[start:end].copy()
+
+        if start > 0:
+            p2 = trajectory[start]
+            p1 = trajectory[start - 1]
+
+            delta = p2 - p1
+            yaw = np.arctan2(delta[1], delta[0])
+        else:
+            yaw = course[1][3] + np.pi/3
+
+        rotation = R.from_euler('z', -yaw).as_matrix()
+
+        rot_xy = rotation[:2, :2]
+        trans_xy = trajectory[start, :2]
+        xy_shifted = trajectory_slice[:, :2] - trans_xy
+        xy_ego = xy_shifted @ rot_xy.T
+
+        trajectory_slice[:, :2] = xy_ego
+
+        return torch.tensor(trajectory_slice, dtype=torch.float32)
 
     def __str__(self):
         return f"QuadrotorRaceSegmentDataset({self.course_types}, {self.traj_len}, {self.padding})"
 
 
 class DiffusionDataset(Dataset):
-    def __init__(self, data_dir: str, traj_len: int, normalizer: Normalizer):
+    def __init__(self, data_dir: str, traj_len: int, normalizer: Normalizer, folder="diffusion3"):
         """
         Args:
             data_dir (str): Root dir where course/linear, course/u, etc exists
@@ -226,10 +254,11 @@ class DiffusionDataset(Dataset):
         self.normalizer = normalizer
         self.traj_len = traj_len
         self.data: list[str] = []
+        self.folder = folder
         self._load_data()
 
     def _load_data(self):
-        course_dir = os.path.join(self.data_dir, "courses", "diffusion2")
+        course_dir = os.path.join(self.data_dir, "courses", self.folder)
 
         for sample in os.listdir(course_dir):
             self.data.append(os.path.join(course_dir, sample))
@@ -270,7 +299,43 @@ class DiffusionDataset(Dataset):
         }
 
     def __str__(self):
-        return f"DiffusionDataset({self.traj_len})"
+        return f"DiffusionDataset({self.traj_len}, {self.folder})"
+
+
+class VaeDataset(Dataset):
+    def __init__(self, data_dir: str, normalizer: Normalizer):
+        """
+        Args:
+            data_dir (str): Root dir where course/linear, course/u, etc exists
+        """
+
+        super().__init__()
+        self.data_dir = data_dir
+        self.normalizer = normalizer
+        self.data: list[str] = []
+        self._load_data()
+
+    def _load_data(self):
+        course_dir = os.path.join(self.data_dir, "courses", "vae3")
+
+        for sample in os.listdir(course_dir):
+            self.data.append(os.path.join(course_dir, sample))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        data_filename = self.data[idx]
+
+        assert data_filename.endswith(".pkl")
+
+        with open(data_filename, "rb") as data_file:
+            sample = pickle.load(data_file)
+
+        return sample
+
+    def __str__(self):
+        return f"VAE Cached Dataset"
 
 
 def evaluate_dataset(dataset: Dataset):

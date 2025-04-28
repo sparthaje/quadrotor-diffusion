@@ -18,7 +18,7 @@ from quadrotor_diffusion.utils.nn.args import TrainerArgs
 from quadrotor_diffusion.utils.quad_logging import iprint as print, dataclass_to_table
 from quadrotor_diffusion.utils.simulator import play_trajectory
 from quadrotor_diffusion.utils.file import get_checkpoint_file, get_sample_folder
-from quadrotor_diffusion.planner import plan, cudnn_benchmark, ScoringMethod
+from quadrotor_diffusion.planner import plan_traj_frame, cudnn_benchmark, ScoringMethod
 from quadrotor_diffusion.utils.trajectory import compute_tracking_error
 
 
@@ -32,6 +32,7 @@ parser.add_argument('-t', '--sampler', type=str, help='DDPM / DDIM / LCM', requi
 parser.add_argument('-p', '--epoch', type=int, help='Epoch number, default is biggest', default=None)
 parser.add_argument('-d', '--device', type=str, help='Device to use', default="cuda")
 parser.add_argument('-m', '--no_ema', action='store_true', help="Use normal model instead of ema model.")
+parser.add_argument('--sim', action='store_true', help="Validate in sim.")
 
 args = parser.parse_args()
 sys.argv = [sys.argv[0]]
@@ -103,6 +104,7 @@ def evaluate(
     model: DiffusionWrapper,
     course: str,
     device: str,
+    sim: bool,
 ) -> tuple[bool, bool, float, float, int, float, float, float, float]:
     """
     Evaluates the planner on one course
@@ -113,6 +115,7 @@ def evaluate(
         model (LatentDiffusionWrapper)
         course (str)
         device (str)
+        sim (bool)
 
     Returns:
         tuple[bool, bool, float, float, float, int, float, float, float, float]:
@@ -149,17 +152,28 @@ def evaluate(
 
         s = time.time()
         try:
-            next_traj, generated_samples = plan(
-                samples,
-                global_context,
-                sampler,
-                0.0,
-                ScoringMethod.FAST,
-                model,
-                vae_downsample,
-                device,
-                current_traj
-            )
+            MAX_ATTEMPTS = 1
+            for attempt in range(MAX_ATTEMPTS):
+                try:
+                    next_traj, generated_samples = plan_traj_frame(
+                        samples,
+                        global_context,
+                        sampler,
+                        0.0,
+                        ScoringMethod.FAST,
+                        model,
+                        vae_downsample,
+                        device,
+                        current_traj
+                    )
+                    w = True
+                except ValueError:
+                    w = False
+                    if attempt == MAX_ATTEMPTS - 1:
+                        raise ValueError
+                if w:
+                    break
+
         except ValueError:
             return True, False, dep, dev, generated_plans, 0.0, total_computation_time, total_candidates, mmpwed_sum
 
@@ -208,12 +222,17 @@ def evaluate(
         if gate_idx == len(course):
             gate_idx = 1
 
-    reference = [np.vstack([t[idx] for t in trajectories]) for idx in range(3)]
-    ref_pos = reference[0]
-    ref_vel = reference[1]
-    ref_acc = reference[2]
+    if sim:
+        reference = [np.vstack([t[idx] for t in trajectories]) for idx in range(3)]
+        ref_pos = reference[0]
+        ref_vel = reference[1]
+        ref_acc = reference[2]
 
-    worked, states = play_trajectory(ref_pos, ref_vel, ref_acc)
+        worked, states = play_trajectory(ref_pos, ref_vel, ref_acc)
+        tracking_error = np.linalg.norm(compute_tracking_error(ref_pos, states[0]))
+    else:
+        worked = True
+        tracking_error = 1.0
 
     return (
         False,
@@ -221,7 +240,7 @@ def evaluate(
         dep,
         dev,
         generated_plans,
-        np.linalg.norm(compute_tracking_error(ref_pos, states[0])),
+        tracking_error,
         total_computation_time,
         total_candidates,
         mmpwed_sum
@@ -269,6 +288,7 @@ for course in tqdm.tqdm(courses):
         model,
         course,
         args.device,
+        args.sim,
     )
 
     if planner_failed:

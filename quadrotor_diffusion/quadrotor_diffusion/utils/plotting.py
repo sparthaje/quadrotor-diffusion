@@ -20,6 +20,8 @@ from quadrotor_diffusion.utils.trajectory import INITIAL_GATE_EXIT
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
 from quadrotor_diffusion.utils.trajectory import derive_trajectory
 
+COLORS = matplotlib.rcParams['axes.prop_cycle'].by_key()['color']
+
 
 def plot_reference_time_series(save_path: str, title: str, reference, observed=None):
     """
@@ -354,7 +356,7 @@ class GateLegendHandler(HandlerBase):
         return [rect, left_circle, right_circle]
 
 
-def add_gates_to_course(course: list[np.array], axs: list[plt.Axes], has_end=True):
+def add_gates_to_course(course: list[np.array], axs: list[plt.Axes], has_end=True, has_start=True):
     """
     Adds a list of gates to the plot
 
@@ -362,7 +364,8 @@ def add_gates_to_course(course: list[np.array], axs: list[plt.Axes], has_end=Tru
         course (list[np.array]): Full course including the starting and ending point
         ax (plt.Axes)
     """
-    gates = course[1:-1] if has_end else course[1:]
+    gates = course[:-1] if has_end else course
+    gates = course[1:] if has_start else course
     for obj in gates:
         x, y, z, yaw = obj
         rect = patches.Rectangle((-0.25, -0.05), 0.5, 0.1, edgecolor='black', facecolor='white', alpha=0.8)
@@ -393,12 +396,17 @@ def add_gates_to_course(course: list[np.array], axs: list[plt.Axes], has_end=Tru
 
     starting_face_color = 'black' if course[0][2] == 0.525 else 'white'
     ending_face_color = 'black' if course[-1][2] == 0.525 else 'white'
-    axs[0].scatter([course[0][0]], [course[0][1]], s=100, marker='*', facecolor=starting_face_color, edgecolor='black')
+
+    # if has_start:
+    axs[0].scatter([course[0][0]], [course[0][1]], s=100, marker='*',
+                   facecolor=starting_face_color, edgecolor='black')
     if has_end:
         axs[0].scatter([course[-1][0]], [course[-1][1]], s=100, marker='o',
                        facecolor=ending_face_color, edgecolor='black')
 
-    axs[1].scatter([course[0][0]], [course[0][2]], s=100, marker='*', facecolor=starting_face_color, edgecolor='black')
+    if has_start:
+        axs[1].scatter([course[0][0]], [course[0][2]], s=100, marker='*',
+                       facecolor=starting_face_color, edgecolor='black')
     if has_end:
         axs[1].scatter([course[-1][0]], [course[-1][2]], s=100, marker='o',
                        facecolor=ending_face_color, edgecolor='black')

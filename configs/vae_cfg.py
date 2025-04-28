@@ -4,7 +4,7 @@ import numpy as np
 
 from quadrotor_diffusion.utils.nn.args import TrainerArgs, VAE_EncoderArgs, VAE_DecoderArgs, VAE_WrapperArgs
 from quadrotor_diffusion.utils.dataset.normalizer import GuassianNormalizer, NoNormalizer, LinearNormalizer
-from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceSegmentDataset
+from quadrotor_diffusion.utils.dataset.dataset import QuadrotorRaceSegmentDataset, VaeDataset
 
 train_args = TrainerArgs(
     ema_decay=0.0,
@@ -19,16 +19,16 @@ train_args = TrainerArgs(
 
     learning_rate=2e-4,
     num_gpus=1,
-    device="cuda:1",
+    device="cuda:0",
 
     max_epochs=400,
     evaluate_every=5,
-    description="telomere strat 2"
+    description="ego frame"
 )
 
 vae_args = VAE_WrapperArgs(
     loss="Smooth",
-    beta=0.1,
+    beta=0.05,
     loss_params=(
         "WeightedL1",
         # Weighting on the percent of horizon
@@ -41,16 +41,21 @@ vae_args = VAE_WrapperArgs(
 
 encoder_args = VAE_EncoderArgs(
     3,
-    6,
+    4,
     128,
     (1, 2, 4, 8),
 )
 
 decoder_args = VAE_DecoderArgs(
     3,
-    6,
+    4,
     128,
     (8, 4, 2, 1)
 )
 
-dataset = QuadrotorRaceSegmentDataset('data', ["square", "triangle", "pill"], 128, 0, NoNormalizer())
+# dataset = QuadrotorRaceSegmentDataset('data', ["square", "triangle", "pill"], 128, 0, NoNormalizer())
+
+dataset = VaeDataset(
+    "data",
+    NoNormalizer(),
+)

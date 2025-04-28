@@ -1,11 +1,14 @@
 import os
 import argparse
+import random
 import pickle
 
+from scipy.spatial.transform import Rotation as R
 import numpy as np
 import tqdm
 
 from quadrotor_diffusion.utils.dataset.boundary_condition import PolynomialTrajectory
+from quadrotor_diffusion.utils.plotting import plot_states, add_gates_to_course, add_trajectory_to_course, course_base_plot
 
 LOCAL_CONTEXT_SIZE = 20
 TRAJECTORY_SLICE_LENGTH = 128
@@ -41,9 +44,9 @@ def process_one_example(filename: str, trajectory: PolynomialTrajectory, course:
     for gate_idx in range(number_gates):
         # All following gates up to the current gate (i.e. don't include current gate as part of global context)
         if cyclic:
-            global_context = np.vstack((course[gate_idx+1:], course[1:gate_idx]))
+            global_context = np.vstack((course[gate_idx+1:], course[1:gate_idx])).copy()
         else:
-            global_context = course[gate_idx+1:-1]
+            global_context = course[gate_idx+1:-1].copy()
 
         ending_gate = trajectory.states[gate_idx+1]
         ending_idx = np.argmin(
@@ -54,8 +57,39 @@ def process_one_example(filename: str, trajectory: PolynomialTrajectory, course:
             )
         )
 
-        local_context = trajectory_np[ref_pos_idx - LOCAL_CONTEXT_SIZE: ref_pos_idx+LOCAL_CONTEXT_SIZE]
-        trajectory_slice = trajectory_np[ref_pos_idx:ref_pos_idx+TRAJECTORY_SLICE_LENGTH]
+        local_context = trajectory_np[ref_pos_idx - LOCAL_CONTEXT_SIZE: ref_pos_idx+LOCAL_CONTEXT_SIZE].copy()
+        trajectory_slice = trajectory_np[ref_pos_idx:ref_pos_idx+TRAJECTORY_SLICE_LENGTH].copy()
+
+        if gate_idx == 0:
+            yaw = global_context[0][3] + np.pi/2
+        else:
+            p2 = trajectory_np[ref_pos_idx]
+            p1 = trajectory_np[ref_pos_idx - 1]
+
+            delta = p2 - p1
+            yaw = np.arctan2(delta[1], delta[0])
+
+        rotation = R.from_euler('z', -yaw).as_matrix()
+
+        rot_xy = rotation[:2, :2]
+        trans_xy = trajectory_np[ref_pos_idx, :2]
+
+        xy_shifted = trajectory_slice[:, :2] - trans_xy
+        xy_ego = xy_shifted @ rot_xy.T
+        trajectory_slice[:, :2] = xy_ego
+
+        local_context_xy = local_context[:, :2]
+        local_context_xy = local_context_xy - trans_xy
+        local_context_xy = local_context_xy @ rot_xy.T
+        local_context[:, :2] = local_context_xy
+
+        global_context_xy = global_context[:, :2]
+        global_context_xy = global_context_xy - trans_xy
+        global_context_xy = global_context_xy @ rot_xy.T
+        global_context[:, :2] = global_context_xy
+
+        global_context[:, 3] -= yaw
+        global_context[:, 3] = np.arctan2(np.sin(global_context[:, 3]), np.cos(global_context[:, 3]))
 
         with open(f"{filename}_{gate_idx}.pkl", 'wb') as file:
             pickle.dump({
@@ -63,6 +97,59 @@ def process_one_example(filename: str, trajectory: PolynomialTrajectory, course:
                 "local_context": local_context,
                 "trajectory_slice": trajectory_slice
             }, file)
+
+        # I just added this part do you see any bugs (within the forloop)
+        for i in range(2):
+            if ending_idx < 50:
+                continue
+
+            offset = random.randint(25, 45)
+            ref_pos_idx += offset
+
+            if cyclic:
+                global_context = np.vstack((course[gate_idx+1:], course[1:gate_idx])).copy()
+            else:
+                global_context = course[gate_idx+1:-1].copy()
+
+            local_context = trajectory_np[ref_pos_idx - LOCAL_CONTEXT_SIZE: ref_pos_idx+LOCAL_CONTEXT_SIZE].copy()
+            trajectory_slice = trajectory_np[ref_pos_idx:ref_pos_idx+TRAJECTORY_SLICE_LENGTH].copy()
+
+            p2 = trajectory_np[ref_pos_idx]
+            p1 = trajectory_np[ref_pos_idx - 1]
+
+            delta = p2 - p1
+            yaw = np.arctan2(delta[1], delta[0])
+
+            rotation = R.from_euler('z', -yaw).as_matrix()
+
+            rot_xy = rotation[:2, :2]
+            trans_xy = trajectory_np[ref_pos_idx, :2]
+
+            xy_shifted = trajectory_slice[:, :2] - trans_xy
+            xy_ego = xy_shifted @ rot_xy.T
+            trajectory_slice[:, :2] = xy_ego
+
+            local_context_xy = local_context[:, :2]
+            local_context_xy = local_context_xy - trans_xy
+            local_context_xy = local_context_xy @ rot_xy.T
+            local_context[:, :2] = local_context_xy
+
+            global_context_xy = global_context[:, :2]
+            global_context_xy = global_context_xy - trans_xy
+            global_context_xy = global_context_xy @ rot_xy.T
+            global_context[:, :2] = global_context_xy
+
+            global_context[:, 3] -= yaw
+            global_context[:, 3] = np.arctan2(np.sin(global_context[:, 3]), np.cos(global_context[:, 3]))
+
+            with open(f"{filename}_{gate_idx}_{i}.pkl", 'wb') as file:
+                pickle.dump({
+                    "global_context": global_context,
+                    "local_context": local_context,
+                    "trajectory_slice": trajectory_slice
+                }, file)
+
+            ref_pos_idx -= offset
 
         ref_pos_idx += ending_idx
 
@@ -109,7 +196,7 @@ for course_type in args.courses:
                     with open(traj_filename, "rb") as trajectory_file:
                         trajectory: PolynomialTrajectory = pickle.load(trajectory_file)
 
-                    filename = os.path.join(args.base_dir, "diffusion2", f"{sample_num}")
+                    filename = os.path.join(args.base_dir, "diffusion4", f"{sample_num}")
                     process_one_example(filename, trajectory, course, n_gates[course_type], cyclic[course_type])
                     sample_num += 1
                     num_trajectories_in_course += 1
